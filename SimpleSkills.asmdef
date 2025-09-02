@@ -1,0 +1,23 @@
+{
+    "name": "SimpleSkills", 
+    "rootNamespace": "",
+    "references": [
+        "Unity.Addressables",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.ResourceManager",
+        "Unity.TextMeshPro",
+        "SimpleCore",
+        "DOTween.Modules"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
