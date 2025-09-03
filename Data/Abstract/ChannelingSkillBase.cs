@@ -17,6 +17,11 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// </summary>
         public bool IsInfinite => Duration <= 0;
 
+        
+        /// <summary>
+        ///     Event raised when the skill cast is ticked while channeling.
+        /// </summary>
+        /// <param name="context">The <see cref="CastSkillContext"/> of the casted skill.</param>
         protected internal virtual void OnCastTickWhenChanneling(in CastSkillContext context)
         {
             

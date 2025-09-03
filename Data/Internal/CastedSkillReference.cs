@@ -5,7 +5,7 @@ using Unity.Mathematics;
 
 namespace Systems.SimpleSkills.Data.Internal
 {
-    public struct CastedSkillData
+    public struct CastedSkillReference
     {
         /// <summary>
         ///     Skill being casted
@@ -37,7 +37,7 @@ namespace Systems.SimpleSkills.Data.Internal
         /// </summary>
         public SkillState skillState;
 
-        public CastedSkillData([NotNull] SkillBase contextSkill, SkillCastFlags flags)
+        public CastedSkillReference([NotNull] SkillBase contextSkill, SkillCastFlags flags)
         {
             skill = contextSkill;
             chargingTimer = 0;
@@ -47,6 +47,9 @@ namespace Systems.SimpleSkills.Data.Internal
             this.flags = flags;
         }
 
+        /// <summary>
+        ///     Checks if charging is complete
+        /// </summary>
         public bool IsChargingComplete => skillState > SkillState.Charging;
 
         /// <summary>
