@@ -12,12 +12,12 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// <summary>
         ///     Skill charging time
         /// </summary>
-        public float ChargingTime { get; set; }
-        
+        public virtual float ChargingTime { get; } = 0f;
+
         /// <summary>
         ///     Skill cooldown time
         /// </summary>
-        public float CooldownTime { get; protected set; }
+        public virtual float CooldownTime { get; } = 0f;
         
         /// <summary>
         ///     Checks if skill has cooldown

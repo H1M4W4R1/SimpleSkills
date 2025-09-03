@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using JetBrains.Annotations;
 using Systems.SimpleCore.Operations;
 using Systems.SimpleCore.Utility.Enums;
+using Systems.SimpleSkills.Data;
 using Systems.SimpleSkills.Data.Abstract;
 using Systems.SimpleSkills.Data.Context;
 using Systems.SimpleSkills.Data.Enums;
 using Systems.SimpleSkills.Data.Internal;
 using Systems.SimpleSkills.Operations;
 using UnityEngine;
+using UnityEngine.Assertions;
 
 namespace Systems.SimpleSkills.Components
 {
@@ -40,12 +42,18 @@ namespace Systems.SimpleSkills.Components
                 // Update timer and progress events
                 castedSkillData.chargingTimer += deltaTime;
 
-                OnSkillTickWhenCharging(GetCastedSkillContextFor(i));
+                CastSkillContext skillCastContext = GetCastedSkillContextFor(i);
+
+                OnSkillTickWhenCharging(skillCastContext);
                 if (castedSkillData.chargingTimer >= castedSkillData.skill.ChargingTime)
+                {
                     castedSkillData.skillState = castedSkillData.skill is ChannelingSkillBase
                         ? SkillState.Channeling
                         : SkillState.Complete;
-
+                
+                    // We start casting the skill
+                    OnSkillCastStart(skillCastContext);
+                }
                 currentlyCastedSkills[i] = castedSkillData;
             }
         }
@@ -61,7 +69,7 @@ namespace Systems.SimpleSkills.Components
                 if (!castedSkillData.IsChargingComplete) continue;
 
                 // And not yet completed
-                if (!castedSkillData.IsCastComplete) continue;
+                if (castedSkillData.IsCastComplete) continue;
 
                 // And not yet on cooldown
                 if (castedSkillData.IsOnCooldown) continue;
@@ -72,10 +80,9 @@ namespace Systems.SimpleSkills.Components
                 OnSkillTickWhenChanneling(GetCastedSkillContextFor(i));
 
                 if (castedSkillData.channelingTimer >= channelingSkill.Duration && !channelingSkill.IsInfinite)
-                {
                     castedSkillData.skillState = SkillState.Complete;
-                    currentlyCastedSkills[i] = castedSkillData;
-                }
+                
+                currentlyCastedSkills[i] = castedSkillData;
             }
         }
 
@@ -103,23 +110,33 @@ namespace Systems.SimpleSkills.Components
 
         protected void HandleCooldowns(float deltaTime)
         {
-            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            for (int i = currentlyCastedSkills.Count - 1; i >= 0; i--)
             {
                 CastedSkillData castedSkillData = currentlyCastedSkills[i];
                 if (!castedSkillData.IsOnCooldown) continue;
 
                 castedSkillData.cooldownTimer += deltaTime;
-
+                currentlyCastedSkills[i] = castedSkillData;
+                
+                // Clear casted skill context if cooldown is finished
                 if (castedSkillData.cooldownTimer >= castedSkillData.skill.CooldownTime)
-                {
                     ClearCastedSkillContext(i);
-                }
             }
         }
 
 #endregion
 
 #region Casting, Interrupting, Cancelling
+
+        public OperationResult TryCastSkill<TSkill>(
+            SkillCastFlags flags = SkillCastFlags.None,
+            ActionSource actionSource = ActionSource.External)
+            where TSkill : SkillBase, new()
+        {
+            TSkill skill = SkillsDatabase.GetExact<TSkill>();
+            Assert.IsNotNull(skill, "Skill was not found in database");
+            return TryCastSkill(skill, flags, actionSource);
+        }
 
         public OperationResult TryCastSkill(
             [NotNull] SkillBase skill,
@@ -176,11 +193,17 @@ namespace Systems.SimpleSkills.Components
             // Execute events
             RegisterCastedSkill(context);
 
-            // There's no reason to block cast start as it will commonly contain
-            // some kind of animation or sound that will be required for skill to function properly
-            // if (actionSource == ActionSource.Internal) return SkillOperations.Casted();
-            OnSkillCastStart(context);
             return SkillOperations.Casted();
+        }
+
+        public OperationResult TryCancelSkill<TSkill>(
+            SkillCastFlags flags = SkillCastFlags.None,
+            ActionSource actionSource = ActionSource.External)
+            where TSkill : SkillBase, new()
+        {
+            TSkill skill = SkillsDatabase.GetExact<TSkill>();
+            Assert.IsNotNull(skill, "Skill was not found in database");
+            return TryCancelSkill(skill, flags, actionSource);
         }
 
         public OperationResult TryCancelSkill(
@@ -205,6 +228,15 @@ namespace Systems.SimpleSkills.Components
                 OnSkillCastCancelFailed(context, opResult);
                 return opResult;
             }
+            
+            // Check if skill is on cooldown
+            if (skillData.Value.IsOnCooldown)
+            {
+                OperationResult opResult = SkillOperations.CooldownNotFinished();
+                if (actionSource == ActionSource.Internal) return opResult;
+                OnSkillCastCancelFailed(context, opResult);
+                return opResult;
+            }
 
             OperationResult canSkillBeCancelledCheck = CanSkillBeCancelled(context);
             if (!canSkillBeCancelledCheck && (context.flags & SkillCastFlags.IgnoreRequirements) == 0)
@@ -223,6 +255,16 @@ namespace Systems.SimpleSkills.Components
             if (actionSource == ActionSource.Internal) return canSkillBeCancelledCheck;
             OnSkillCastCancelled(context, canSkillBeCancelledCheck);
             return canSkillBeCancelledCheck;
+        }
+        
+        public OperationResult TryInterruptSkill<TSkill>(
+            SkillCastFlags flags = SkillCastFlags.None,
+            ActionSource actionSource = ActionSource.External)
+        where TSkill : SkillBase, new()
+        {
+            TSkill skill = SkillsDatabase.GetExact<TSkill>();
+            Assert.IsNotNull(skill, "Skill was not found in database");
+            return TryInterruptSkill(skill, flags, actionSource);
         }
 
         public OperationResult TryInterruptSkill(
@@ -245,6 +287,15 @@ namespace Systems.SimpleSkills.Components
                 OperationResult opResult = SkillOperations.SkillNotCasted();
                 if (actionSource == ActionSource.Internal) return opResult;
                 OnSkillCastInterruptFailed(context, opResult);
+                return opResult;
+            }
+            
+            // Check if skill is on cooldown
+            if (skillData.Value.IsOnCooldown)
+            {
+                OperationResult opResult = SkillOperations.CooldownNotFinished();
+                if (actionSource == ActionSource.Internal) return opResult;
+                OnSkillCastCancelFailed(context, opResult);
                 return opResult;
             }
 

@@ -10,7 +10,7 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// <summary>
         ///     Total channel duration
         /// </summary>
-        public float Duration { get; set; }
+        public virtual float Duration { get; } = 0f;
 
         /// <summary>
         ///     Channeling is infinite
