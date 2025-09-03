@@ -12,6 +12,11 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// </summary>
         public float Duration { get; set; }
 
+        /// <summary>
+        ///     Channeling is infinite
+        /// </summary>
+        public bool IsInfinite => Duration <= 0;
+
         protected internal virtual void OnCastTickWhenChanneling(in CastSkillContext context)
         {
             
