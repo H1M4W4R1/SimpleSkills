@@ -1,4 +1,5 @@
 ﻿using Systems.SimpleSkills.Components;
+using Systems.SimpleSkills.Data.Abstract;
 using Systems.SimpleSkills.Data.Enums;
 
 namespace Systems.SimpleSkills.Data.Context
@@ -19,23 +20,12 @@ namespace Systems.SimpleSkills.Data.Context
         ///     Flags
         /// </summary>
         public readonly SkillCastFlags flags;
-        
-        /// <summary>
-        ///     Result of the cast
-        /// </summary>
-        public readonly SkillCastResult result;
 
-        public CastSkillContext WithResult(SkillCastResult newResult)
-        {
-            return new CastSkillContext(caster, skill, flags, result);
-        }
-        
-        public CastSkillContext(SkillCasterBase caster, SkillBase skill, SkillCastFlags flags, SkillCastResult result)
+        public CastSkillContext(SkillCasterBase caster, SkillBase skill, SkillCastFlags flags)
         {
             this.caster = caster;
             this.skill = skill;
             this.flags = flags;
-            this.result = result;
         }
     }
 }
