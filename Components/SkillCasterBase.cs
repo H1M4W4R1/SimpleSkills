@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using JetBrains.Annotations;
 using Systems.SimpleCore.Operations;
 using Systems.SimpleCore.Utility.Enums;
@@ -16,6 +17,17 @@ namespace Systems.SimpleSkills.Components
     /// </summary>
     public abstract class SkillCasterBase : MonoBehaviour
     {
+#region Ticks
+
+        protected void Update()
+        {
+            float deltaTime = Time.deltaTime;
+            HandleCharging(deltaTime);
+            HandleChanneling(deltaTime);
+            HandleSkillsCompleted(deltaTime);
+            HandleCooldowns(deltaTime);
+        }
+
         protected void HandleCharging(float deltaTime)
         {
             for (int i = 0; i < currentlyCastedSkills.Count; i++)
@@ -50,7 +62,7 @@ namespace Systems.SimpleSkills.Components
 
                 // And not yet completed
                 if (!castedSkillData.IsCastComplete) continue;
-                
+
                 // And not yet on cooldown
                 if (castedSkillData.IsOnCooldown) continue;
 
@@ -81,9 +93,8 @@ namespace Systems.SimpleSkills.Components
                 if (castedSkillData.IsOnCooldown) continue;
 
                 // Handle cast end event if wasn't cancelled / interrupted
-                if(castedSkillData.skillState == SkillState.Complete)
-                    OnSkillCastEnd(GetCastedSkillContextFor(i));
-                
+                if (castedSkillData.skillState == SkillState.Complete) OnSkillCastEnd(GetCastedSkillContextFor(i));
+
                 // Update data
                 castedSkillData.skillState = SkillState.Cooldown;
                 currentlyCastedSkills[i] = castedSkillData;
@@ -96,9 +107,9 @@ namespace Systems.SimpleSkills.Components
             {
                 CastedSkillData castedSkillData = currentlyCastedSkills[i];
                 if (!castedSkillData.IsOnCooldown) continue;
-                
+
                 castedSkillData.cooldownTimer += deltaTime;
-                
+
                 if (castedSkillData.cooldownTimer >= castedSkillData.skill.CooldownTime)
                 {
                     ClearCastedSkillContext(i);
@@ -106,6 +117,9 @@ namespace Systems.SimpleSkills.Components
             }
         }
 
+#endregion
+
+#region Casting, Interrupting, Cancelling
 
         public OperationResult TryCastSkill(
             [NotNull] SkillBase skill,
@@ -182,18 +196,30 @@ namespace Systems.SimpleSkills.Components
             in CastSkillContext context,
             ActionSource actionSource = ActionSource.External)
         {
-            // TODO: GET CASTED SKILL!
-            
+            // Ensure skill is casted
+            CastedSkillData? skillData = GetCastedSkillDataFor(context.skill);
+            if (skillData is null)
+            {
+                OperationResult opResult = SkillOperations.SkillNotCasted();
+                if (actionSource == ActionSource.Internal) return opResult;
+                OnSkillCastCancelFailed(context, opResult);
+                return opResult;
+            }
+
             OperationResult canSkillBeCancelledCheck = CanSkillBeCancelled(context);
             if (!canSkillBeCancelledCheck && (context.flags & SkillCastFlags.IgnoreRequirements) == 0)
             {
                 if (actionSource == ActionSource.Internal) return canSkillBeCancelledCheck;
-                OnSkillCastFailed(context, canSkillBeCancelledCheck);
+                OnSkillCastCancelFailed(context, canSkillBeCancelledCheck);
                 return canSkillBeCancelledCheck;
             }
 
+            // Update casted skill data
+            CastedSkillData skillDataValue = skillData.Value;
+            skillDataValue.skillState = SkillState.Interrupted;
+            UpdateCastedSkillDataFor(context.skill, skillDataValue);
+
             // Execute events
-            // TODO: Move casted skill to complete state
             if (actionSource == ActionSource.Internal) return canSkillBeCancelledCheck;
             OnSkillCastCancelled(context, canSkillBeCancelledCheck);
             return canSkillBeCancelledCheck;
@@ -212,8 +238,16 @@ namespace Systems.SimpleSkills.Components
             in CastSkillContext context,
             ActionSource actionSource = ActionSource.External)
         {
-            // TODO: GET CASTED SKILL!
-            
+            // Ensure skill is casted
+            CastedSkillData? skillData = GetCastedSkillDataFor(context.skill);
+            if (skillData is null)
+            {
+                OperationResult opResult = SkillOperations.SkillNotCasted();
+                if (actionSource == ActionSource.Internal) return opResult;
+                OnSkillCastInterruptFailed(context, opResult);
+                return opResult;
+            }
+
             OperationResult canSkillBeInterruptedCheck = CanSkillBeInterrupted(context);
             if (!canSkillBeInterruptedCheck && (context.flags & SkillCastFlags.IgnoreRequirements) == 0)
             {
@@ -222,12 +256,18 @@ namespace Systems.SimpleSkills.Components
                 return canSkillBeInterruptedCheck;
             }
 
+            // Update casted skill data
+            CastedSkillData skillDataValue = skillData.Value;
+            skillDataValue.skillState = SkillState.Interrupted;
+            UpdateCastedSkillDataFor(context.skill, skillDataValue);
+
             // Execute events
-            // TODO: Move casted skill to complete state
             if (actionSource == ActionSource.Internal) return canSkillBeInterruptedCheck;
             OnSkillCastInterrupted(context, canSkillBeInterruptedCheck);
             return canSkillBeInterruptedCheck;
         }
+
+#endregion
 
 #region Skill List management
 
@@ -261,9 +301,10 @@ namespace Systems.SimpleSkills.Components
 
         private CastSkillContext GetCastedSkillContextFor(int index)
         {
-            return new CastSkillContext(this, currentlyCastedSkills[index].skill, currentlyCastedSkills[index].flags);
+            return new CastSkillContext(this, currentlyCastedSkills[index].skill,
+                currentlyCastedSkills[index].flags);
         }
-        
+
         private CastedSkillData? GetCastedSkillDataFor([NotNull] SkillBase skill)
         {
             for (int index = 0; index < currentlyCastedSkills.Count; index++)
@@ -274,7 +315,18 @@ namespace Systems.SimpleSkills.Components
 
             return null;
         }
-        
+
+        private void UpdateCastedSkillDataFor([NotNull] SkillBase skill, CastedSkillData updatedData)
+        {
+            for (int index = 0; index < currentlyCastedSkills.Count; index++)
+            {
+                CastedSkillData castedSkillData = currentlyCastedSkills[index];
+                if (!ReferenceEquals(castedSkillData.skill, skill)) continue;
+                currentlyCastedSkills[index] = updatedData;
+                break;
+            }
+        }
+
 #endregion
 
 #region Checks
@@ -290,11 +342,9 @@ namespace Systems.SimpleSkills.Components
             // If skill is not casted, it is not on cooldown
             CastedSkillData? data = GetCastedSkillDataFor(context.skill);
             if (data is null) return SkillOperations.Permitted();
-            
+
             // If skill is casted, check if it is on cooldown
-            return data.Value.IsOnCooldown ?
-                SkillOperations.CooldownNotFinished() :
-                SkillOperations.Permitted();
+            return data.Value.IsOnCooldown ? SkillOperations.CooldownNotFinished() : SkillOperations.Permitted();
         }
 
         public virtual OperationResult HasEnoughSkillResources(in CastSkillContext context) =>
