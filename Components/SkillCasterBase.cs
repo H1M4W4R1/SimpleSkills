@@ -50,10 +50,11 @@ namespace Systems.SimpleSkills.Components
                     castedSkillData.skillState = castedSkillData.skill is ChannelingSkillBase
                         ? SkillState.Channeling
                         : SkillState.Complete;
-                
+
                     // We start casting the skill
                     OnSkillCastStart(skillCastContext);
                 }
+
                 currentlyCastedSkills[i] = castedSkillData;
             }
         }
@@ -81,7 +82,7 @@ namespace Systems.SimpleSkills.Components
 
                 if (castedSkillData.channelingTimer >= channelingSkill.Duration && !channelingSkill.IsInfinite)
                     castedSkillData.skillState = SkillState.Complete;
-                
+
                 currentlyCastedSkills[i] = castedSkillData;
             }
         }
@@ -117,10 +118,9 @@ namespace Systems.SimpleSkills.Components
 
                 castedSkillData.cooldownTimer += deltaTime;
                 currentlyCastedSkills[i] = castedSkillData;
-                
+
                 // Clear casted skill context if cooldown is finished
-                if (castedSkillData.cooldownTimer >= castedSkillData.skill.CooldownTime)
-                    ClearCastedSkillContext(i);
+                if (castedSkillData.cooldownTimer >= castedSkillData.skill.CooldownTime) ClearCastedSkillDataAt(i);
             }
         }
 
@@ -191,7 +191,7 @@ namespace Systems.SimpleSkills.Components
             }
 
             // Execute events
-            RegisterCastedSkill(context);
+            RegisterCastedDataFor(context);
 
             return SkillOperations.Casted();
         }
@@ -228,7 +228,7 @@ namespace Systems.SimpleSkills.Components
                 OnSkillCastCancelFailed(context, opResult);
                 return opResult;
             }
-            
+
             // Check if skill is on cooldown
             if (skillData.Value.IsOnCooldown)
             {
@@ -256,11 +256,11 @@ namespace Systems.SimpleSkills.Components
             OnSkillCastCancelled(context, canSkillBeCancelledCheck);
             return canSkillBeCancelledCheck;
         }
-        
+
         public OperationResult TryInterruptSkill<TSkill>(
             SkillCastFlags flags = SkillCastFlags.None,
             ActionSource actionSource = ActionSource.External)
-        where TSkill : SkillBase, new()
+            where TSkill : SkillBase, new()
         {
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
             Assert.IsNotNull(skill, "Skill was not found in database");
@@ -289,7 +289,7 @@ namespace Systems.SimpleSkills.Components
                 OnSkillCastInterruptFailed(context, opResult);
                 return opResult;
             }
-            
+
             // Check if skill is on cooldown
             if (skillData.Value.IsOnCooldown)
             {
@@ -335,7 +335,7 @@ namespace Systems.SimpleSkills.Components
         /// <summary>
         ///     Register casted skill in list
         /// </summary>
-        private void RegisterCastedSkill(in CastSkillContext context)
+        private void RegisterCastedDataFor(in CastSkillContext context)
         {
             // Convert context to casted skill data
             CastedSkillData castedSkillData = new(context.skill, context.flags);
@@ -345,9 +345,44 @@ namespace Systems.SimpleSkills.Components
         /// <summary>
         ///     Clear casted skill from list
         /// </summary>
-        private void ClearCastedSkillContext(int index)
+        private void ClearCastedSkillDataAt(int index)
         {
             currentlyCastedSkills.RemoveAt(index);
+        }
+
+        private void UpdateCastedSkillDataFor([NotNull] SkillBase skill, CastedSkillData updatedData)
+        {
+            for (int index = 0; index < currentlyCastedSkills.Count; index++)
+            {
+                CastedSkillData castedSkillData = currentlyCastedSkills[index];
+                if (!ReferenceEquals(castedSkillData.skill, skill)) continue;
+                currentlyCastedSkills[index] = updatedData;
+                break;
+            }
+        }
+
+        /// <summary>
+        ///     Tries to get casted skill data for skill
+        /// </summary>
+        public bool TryGetCastedSkillDataFor<TSkill>(out CastedSkillData castedSkillData)
+            where TSkill : SkillBase, new()
+        {
+            TSkill skill = SkillsDatabase.GetExact<TSkill>();
+            Assert.IsNotNull(skill, "Skill was not found in database");
+            return TryGetCastedSkillDataFor(skill, out castedSkillData);
+        }
+
+        /// <summary>
+        ///     Tries to get casted skill data for skill
+        /// </summary>
+        public bool TryGetCastedSkillDataFor([NotNull] SkillBase skill, out CastedSkillData castedSkillData)
+        {
+            castedSkillData = default;
+
+            CastedSkillData? internalResult = GetCastedSkillDataFor(skill);
+            if (internalResult is null) return false;
+            castedSkillData = internalResult.Value;
+            return true;
         }
 
         private CastSkillContext GetCastedSkillContextFor(int index)
@@ -365,17 +400,6 @@ namespace Systems.SimpleSkills.Components
             }
 
             return null;
-        }
-
-        private void UpdateCastedSkillDataFor([NotNull] SkillBase skill, CastedSkillData updatedData)
-        {
-            for (int index = 0; index < currentlyCastedSkills.Count; index++)
-            {
-                CastedSkillData castedSkillData = currentlyCastedSkills[index];
-                if (!ReferenceEquals(castedSkillData.skill, skill)) continue;
-                currentlyCastedSkills[index] = updatedData;
-                break;
-            }
         }
 
 #endregion
