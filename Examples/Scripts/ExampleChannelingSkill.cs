@@ -12,7 +12,7 @@ namespace Systems.SimpleSkills.Examples.Scripts
 
         public override float CooldownTime => 1f;
 
-        public override OperationResult CanBeInterrupted(in InterruptSkillContext context)
+        protected internal override OperationResult CanBeInterrupted(in InterruptSkillContext context)
         {
             // Permit cancellation, but deny (base behavior) interruption
             if (context.IsCancellation) return SkillOperations.Permitted();

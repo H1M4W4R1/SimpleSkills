@@ -123,7 +123,7 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// </summary>
         /// <param name="context">The <see cref="InterruptSkillContext"/> to check.</param>
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill can be interrupted.</returns>
-        public virtual OperationResult CanBeInterrupted(in InterruptSkillContext context) =>
+        protected internal virtual OperationResult CanBeInterrupted(in InterruptSkillContext context) =>
             SkillOperations.Denied();
 
         
