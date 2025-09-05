@@ -472,7 +472,7 @@ namespace Systems.SimpleSkills.Components
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill is available to be casted.</returns>
-        public virtual OperationResult IsSkillAvailable(in CastSkillContext context) =>
+        protected virtual OperationResult IsSkillAvailable(in CastSkillContext context) =>
             context.skill.IsSkillAvailable(context);
 
         /// <summary>
@@ -485,7 +485,7 @@ namespace Systems.SimpleSkills.Components
         ///     If the skill is not casted, it is not on cooldown.
         ///     If the skill is casted, it is on cooldown if its cooldown timer has not finished yet.
         /// </remarks>
-        public virtual OperationResult IsSkillOnCooldown(in CastSkillContext context)
+        protected virtual OperationResult IsSkillOnCooldown(in CastSkillContext context)
         {
             // If skill has no cooldown, it is not on cooldown
             if (!context.skill.HasCooldown) return SkillOperations.Permitted();
@@ -504,7 +504,7 @@ namespace Systems.SimpleSkills.Components
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill has enough resources to be casted.</returns>
-        public virtual OperationResult HasEnoughSkillResources(in CastSkillContext context) =>
+        protected virtual OperationResult HasEnoughSkillResources(in CastSkillContext context) =>
             context.skill.HasEnoughResources(context);
 
         
@@ -517,7 +517,7 @@ namespace Systems.SimpleSkills.Components
         ///     This method can be used to generate chance-based skills as resources will be consumed before
         ///     casting this check.
         /// </remarks>
-        public virtual OperationResult CheckCastAttemptSuccess(in CastSkillContext context) =>
+        protected virtual OperationResult CheckCastAttemptSuccess(in CastSkillContext context) =>
             context.skill.CheckAttemptSuccess(context);
 
         /// <summary>
@@ -525,7 +525,7 @@ namespace Systems.SimpleSkills.Components
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill can be interrupted.</returns>
-        public virtual OperationResult CanSkillBeInterrupted(in InterruptSkillContext context) =>
+        protected virtual OperationResult CanSkillBeInterrupted(in InterruptSkillContext context) =>
             context.skill.CanBeInterrupted(context);
       
 #endregion
@@ -537,7 +537,7 @@ namespace Systems.SimpleSkills.Components
         ///     Consumes the resources required to cast the skill.
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to consume resources for.</param>
-        public virtual void ConsumeSkillResources(in CastSkillContext context) =>
+        protected virtual void ConsumeSkillResources(in CastSkillContext context) =>
             context.skill.ConsumeResources(context);
 
         /// <summary>

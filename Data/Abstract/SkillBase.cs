@@ -34,7 +34,7 @@ namespace Systems.SimpleSkills.Data.Abstract
         ///     This method should be used to check general availability of the skill e.g. if skill gem is in inventory,
         ///     but not if skill is on cooldown or caster has enough resources.
         /// </remarks>
-        public virtual OperationResult IsSkillAvailable(in CastSkillContext context) =>
+        protected internal virtual OperationResult IsSkillAvailable(in CastSkillContext context) =>
             SkillOperations.Permitted();
 
         
@@ -43,7 +43,7 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill has enough resources to be casted.</returns>
-        public OperationResult HasEnoughResources(in CastSkillContext context) 
+        protected internal OperationResult HasEnoughResources(in CastSkillContext context) 
             => SkillOperations.Permitted();
         
         /// <summary>
@@ -55,14 +55,14 @@ namespace Systems.SimpleSkills.Data.Abstract
         ///     This method can be used to generate chance-based skills as resources will be consumed before
         ///     casting this check.
         /// </remarks>
-        public virtual OperationResult CheckAttemptSuccess(in CastSkillContext context) => 
+        protected internal virtual OperationResult CheckAttemptSuccess(in CastSkillContext context) => 
             SkillOperations.Permitted();
 
         /// <summary>
         ///     Consumes the resources required to cast the skill.
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to consume resources for.</param>
-        public virtual void ConsumeResources(in CastSkillContext context)
+        protected internal virtual void ConsumeResources(in CastSkillContext context)
         {
             
         }
