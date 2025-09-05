@@ -23,7 +23,7 @@ namespace Systems.SimpleSkills.Examples.Scripts
         [ContextMenu("Interrupt channeling skill")]
         public void InterruptChannelingSkill()
         {
-            if(OperationResult.IsError(TryInterruptSkill<ExampleChannelingSkill>()))
+            if(OperationResult.IsError(TryInterruptSkill<ExampleChannelingSkill>(null)))
                Debug.LogError("Failed to interrupt channeling skill");
             else Debug.Log("Channeling skill interrupted");
         }

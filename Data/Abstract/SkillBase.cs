@@ -121,21 +121,21 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// <summary>
         ///     Checks if the <paramref name="context"/> skill can be interrupted.
         /// </summary>
-        /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
+        /// <param name="context">The <see cref="InterruptSkillContext"/> to check.</param>
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill can be interrupted.</returns>
-        public virtual OperationResult CanBeInterrupted(in CastSkillContext context) =>
+        public virtual OperationResult CanBeInterrupted(in InterruptSkillContext context) =>
             SkillOperations.Denied();
 
         
         /// <summary>
         ///     Event raised when the skill cast was interrupted.
         /// </summary>
-        /// <param name="context">The <see cref="CastSkillContext"/> of the interrupted skill.</param>
+        /// <param name="context">The <see cref="InterruptSkillContext"/> of the interrupted skill.</param>
         /// <param name="reason">The reason why the skill was interrupted.</param>
         /// <remarks>
         ///     This method is called when the skill was interrupted while it was charging or channeling.
         /// </remarks>
-        protected internal virtual void OnCastInterrupted(in CastSkillContext context, in OperationResult reason)
+        protected internal virtual void OnCastInterrupted(in InterruptSkillContext context, in OperationResult reason)
         {
             
         }
@@ -143,53 +143,14 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// <summary>
         ///     Event raised when the skill cast was interrupted but the interrupt attempt failed.
         /// </summary>
-        /// <param name="context">The <see cref="CastSkillContext"/> of the interrupted skill.</param>
+        /// <param name="context">The <see cref="InterruptSkillContext"/> of the interrupted skill.</param>
         /// <param name="reason">The reason why the interrupt attempt failed.</param>
         /// <remarks>
         ///     This method is called when the skill was interrupted while it was charging or channeling and the interrupt attempt failed.
         /// </remarks>
-        protected internal virtual void OnCastInterruptFailed(in CastSkillContext context, in OperationResult reason)
+        protected internal virtual void OnCastInterruptFailed(in InterruptSkillContext context, in OperationResult reason)
         {
             
         }
-        
-        /// <summary>
-        ///     Checks if the <paramref name="context"/> skill can be cancelled.
-        /// </summary>
-        /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
-        /// <returns>An <see cref="OperationResult"/> indicating whether the skill can be cancelled.</returns>
-        /// <remarks>
-        ///     This method should be used to check if the skill can be cancelled at any point of its lifetime.
-        /// </remarks>
-        public virtual OperationResult CanBeCancelled(in CastSkillContext context) =>
-            SkillOperations.Denied();
-        
-        /// <summary>
-        ///     Event raised when the skill cast was cancelled.
-        /// </summary>
-        /// <param name="context">The <see cref="CastSkillContext"/> of the cancelled skill.</param>
-        /// <param name="reason">The reason why the skill was cancelled.</param>
-        /// <remarks>
-        ///     This method is called when the skill was cancelled while it was charging or channeling.
-        /// </remarks>
-        protected internal virtual void OnCastCancelled(in CastSkillContext context, in OperationResult reason)
-        {
-            
-        }
-        
-        /// <summary>
-        ///     Event raised when the skill cast was cancelled but the cancellation attempt failed.
-        /// </summary>
-        /// <param name="context">The <see cref="CastSkillContext"/> of the cancelled skill.</param>
-        /// <param name="reason">The reason why the cancellation attempt failed.</param>
-        /// <remarks>
-        ///     This method is called when the skill was cancelled while it was charging or channeling and the cancellation attempt failed.
-        /// </remarks>
-        protected internal virtual void OnCastCancelFailed(in CastSkillContext context, in OperationResult reason)
-        {
-            
-        }
-
-    
     }
 }

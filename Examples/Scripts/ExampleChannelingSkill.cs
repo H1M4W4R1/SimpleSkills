@@ -12,10 +12,14 @@ namespace Systems.SimpleSkills.Examples.Scripts
 
         public override float CooldownTime => 1f;
 
-        public override OperationResult CanBeCancelled(in CastSkillContext context)
+        public override OperationResult CanBeInterrupted(in InterruptSkillContext context)
         {
-            return SkillOperations.Permitted();
+            // Permit cancellation, but deny (base behavior) interruption
+            if (context.IsCancellation) return SkillOperations.Permitted();
+            
+            return base.CanBeInterrupted(in context);
         }
+
 
         protected internal override void OnCastStarted(in CastSkillContext context)
         {

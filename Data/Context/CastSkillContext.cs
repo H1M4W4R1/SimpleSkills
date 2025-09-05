@@ -1,4 +1,5 @@
-﻿using Systems.SimpleSkills.Components;
+﻿using JetBrains.Annotations;
+using Systems.SimpleSkills.Components;
 using Systems.SimpleSkills.Data.Abstract;
 using Systems.SimpleSkills.Data.Enums;
 
@@ -9,19 +10,19 @@ namespace Systems.SimpleSkills.Data.Context
         /// <summary>
         ///     Object that casts the skill
         /// </summary>
-        public readonly SkillCasterBase caster;
+        [NotNull] public readonly SkillCasterBase caster;
         
         /// <summary>
         ///     Skill reference
         /// </summary>
-        public readonly SkillBase skill;
+        [NotNull] public readonly SkillBase skill;
         
         /// <summary>
         ///     Flags
         /// </summary>
         public readonly SkillCastFlags flags;
 
-        public CastSkillContext(SkillCasterBase caster, SkillBase skill, SkillCastFlags flags)
+        public CastSkillContext([NotNull] SkillCasterBase caster, [NotNull] SkillBase skill, SkillCastFlags flags)
         {
             this.caster = caster;
             this.skill = skill;

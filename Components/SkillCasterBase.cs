@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using JetBrains.Annotations;
 using Systems.SimpleCore.Operations;
 using Systems.SimpleCore.Utility.Enums;
@@ -252,7 +253,7 @@ namespace Systems.SimpleSkills.Components
         /// <typeparam name="TSkill">Type of skill to cancel</typeparam>
         /// <returns>Result of operation</returns>
         public OperationResult TryCancelSkill<TSkill>(
-            SkillCastFlags flags = SkillCastFlags.None,
+            SkillInterruptFlags flags = SkillInterruptFlags.None,
             ActionSource actionSource = ActionSource.External)
             where TSkill : SkillBase, new()
         {
@@ -270,91 +271,47 @@ namespace Systems.SimpleSkills.Components
         /// <returns>Result of operation</returns>
         public OperationResult TryCancelSkill(
             [NotNull] SkillBase skill,
-            SkillCastFlags flags = SkillCastFlags.None,
+            SkillInterruptFlags flags = SkillInterruptFlags.None,
             ActionSource actionSource = ActionSource.External)
         {
-            CastSkillContext context = new(this, skill, flags);
-            return TryCancelSkill(context, actionSource);
-        }
-
-        /// <summary>
-        ///     Tries to cancel casted skill
-        /// </summary>
-        /// <param name="context">Context of skill cast</param>
-        /// <param name="actionSource">Source of action</param>
-        /// <returns>Result of operation</returns>
-        public OperationResult TryCancelSkill(
-            in CastSkillContext context,
-            ActionSource actionSource = ActionSource.External)
-        {
-            // Ensure skill is casted
-            CastedSkillReference? skillData = GetCastedSkillDataFor(context.skill);
-            if (skillData is null)
-            {
-                OperationResult opResult = SkillOperations.SkillNotCasted();
-                if (actionSource == ActionSource.Internal) return opResult;
-                OnSkillCastCancelFailed(context, opResult);
-                return opResult;
-            }
-
-            // Check if skill is on cooldown
-            if (skillData.Value.IsOnCooldown)
-            {
-                OperationResult opResult = SkillOperations.CooldownNotFinished();
-                if (actionSource == ActionSource.Internal) return opResult;
-                OnSkillCastCancelFailed(context, opResult);
-                return opResult;
-            }
-
-            OperationResult canSkillBeCancelledCheck = CanSkillBeCancelled(context);
-            if (!canSkillBeCancelledCheck && (context.flags & SkillCastFlags.IgnoreRequirements) == 0)
-            {
-                if (actionSource == ActionSource.Internal) return canSkillBeCancelledCheck;
-                OnSkillCastCancelFailed(context, canSkillBeCancelledCheck);
-                return canSkillBeCancelledCheck;
-            }
-
-            // Update casted skill data
-            CastedSkillReference skillReferenceValue = skillData.Value;
-            skillReferenceValue.skillState = SkillState.Interrupted;
-            UpdateCastedSkillDataFor(context.skill, skillReferenceValue);
-
-            // Execute events
-            if (actionSource == ActionSource.Internal) return canSkillBeCancelledCheck;
-            OnSkillCastCancelled(context, canSkillBeCancelledCheck);
-            return canSkillBeCancelledCheck;
+            InterruptSkillContext context = new(this, this, skill, flags);
+            return TryInterruptSkill(context, actionSource);
         }
 
         /// <summary>
         ///     Tries to interrupt skill
         /// </summary>
+        /// <param name="source">Source of interruption</param>
         /// <param name="flags">Flags that describe how skill should be casted</param>
         /// <param name="actionSource">Source of action</param>
         /// <typeparam name="TSkill">Type of skill to interrupt</typeparam>
         /// <returns>Result of operation</returns>
         public OperationResult TryInterruptSkill<TSkill>(
-            SkillCastFlags flags = SkillCastFlags.None,
+            [CanBeNull] object source,
+            SkillInterruptFlags flags = SkillInterruptFlags.None,
             ActionSource actionSource = ActionSource.External)
             where TSkill : SkillBase, new()
         {
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
             Assert.IsNotNull(skill, "Skill was not found in database");
-            return TryInterruptSkill(skill, flags, actionSource);
+            return TryInterruptSkill(skill, source, flags, actionSource);
         }
 
         /// <summary>
         ///     Tries to interrupt skill
         /// </summary>
         /// <param name="skill">Skill to interrupt</param>
+        /// <param name="source">Source of interruption</param>
         /// <param name="flags">Flags that describe how skill should be casted</param>
         /// <param name="actionSource">Source of action</param>
         /// <returns>Result of operation</returns>
         public OperationResult TryInterruptSkill(
             [NotNull] SkillBase skill,
-            SkillCastFlags flags = SkillCastFlags.None,
+            [CanBeNull] object source,
+            SkillInterruptFlags flags = SkillInterruptFlags.None,
             ActionSource actionSource = ActionSource.External)
         {
-            CastSkillContext context = new(this, skill, flags);
+            InterruptSkillContext context = new(this, source, skill, flags);
             return TryInterruptSkill(context, actionSource);
         }
 
@@ -364,8 +321,8 @@ namespace Systems.SimpleSkills.Components
         /// <param name="context">Context of skill cast</param>
         /// <param name="actionSource">Source of action</param>
         /// <returns>Result of operation</returns>
-        public OperationResult TryInterruptSkill(
-            in CastSkillContext context,
+        internal OperationResult TryInterruptSkill(
+            in InterruptSkillContext context,
             ActionSource actionSource = ActionSource.External)
         {
             // Ensure skill is casted
@@ -383,12 +340,12 @@ namespace Systems.SimpleSkills.Components
             {
                 OperationResult opResult = SkillOperations.CooldownNotFinished();
                 if (actionSource == ActionSource.Internal) return opResult;
-                OnSkillCastCancelFailed(context, opResult);
+                OnSkillCastInterruptFailed(context, opResult);
                 return opResult;
             }
 
             OperationResult canSkillBeInterruptedCheck = CanSkillBeInterrupted(context);
-            if (!canSkillBeInterruptedCheck && (context.flags & SkillCastFlags.IgnoreRequirements) == 0)
+            if (!canSkillBeInterruptedCheck && (context.flags & SkillInterruptFlags.IgnoreRequirements) == 0)
             {
                 if (actionSource == ActionSource.Internal) return canSkillBeInterruptedCheck;
                 OnSkillCastInterruptFailed(context, canSkillBeInterruptedCheck);
@@ -568,16 +525,8 @@ namespace Systems.SimpleSkills.Components
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill can be interrupted.</returns>
-        public virtual OperationResult CanSkillBeInterrupted(in CastSkillContext context) =>
+        public virtual OperationResult CanSkillBeInterrupted(in InterruptSkillContext context) =>
             context.skill.CanBeInterrupted(context);
-
-        /// <summary>
-        ///     Checks if the <paramref name="context"/> skill can be cancelled.
-        /// </summary>
-        /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
-        /// <returns>An <see cref="OperationResult"/> indicating whether the skill can be cancelled.</returns>
-        public virtual OperationResult CanSkillBeCancelled(in CastSkillContext context) =>
-            context.skill.CanBeCancelled(context);
       
 #endregion
 
@@ -650,7 +599,7 @@ namespace Systems.SimpleSkills.Components
         /// <remarks>
         ///     This method is called when the skill was interrupted while it was charging or channeling.
         /// </remarks>
-        protected virtual void OnSkillCastInterrupted(in CastSkillContext context, in OperationResult reason) =>
+        protected virtual void OnSkillCastInterrupted(in InterruptSkillContext context, in OperationResult reason) =>
             context.skill.OnCastInterrupted(context, reason);
         
         
@@ -662,32 +611,8 @@ namespace Systems.SimpleSkills.Components
         /// <remarks>
         ///     This method is called when the skill was interrupted while it was charging or channeling and the interrupt attempt failed.
         /// </remarks>
-        protected virtual void OnSkillCastInterruptFailed(in CastSkillContext context, in OperationResult reason)
+        protected virtual void OnSkillCastInterruptFailed(in InterruptSkillContext context, in OperationResult reason)
             => context.skill.OnCastInterruptFailed(context, reason);
-
-        
-        /// <summary>
-        ///     Event raised when the skill cast was cancelled.
-        /// </summary>
-        /// <param name="context">The <see cref="CastSkillContext"/> of the cancelled skill.</param>
-        /// <param name="reason">The reason why the skill was cancelled.</param>
-        /// <remarks>
-        ///     This method is called when the skill was cancelled while it was charging or channeling.
-        /// </remarks>
-        protected virtual void OnSkillCastCancelled(in CastSkillContext context, in OperationResult reason) =>
-            context.skill.OnCastCancelled(context, reason);
-        
-        
-        /// <summary>
-        ///     Event raised when the skill cast was cancelled but the cancellation attempt failed.
-        /// </summary>
-        /// <param name="context">The <see cref="CastSkillContext"/> of the cancelled skill.</param>
-        /// <param name="reason">The reason why the cancellation attempt failed.</param>
-        /// <remarks>
-        ///     This method is called when the skill was cancelled while it was charging or channeling and the cancellation attempt failed.
-        /// </remarks>
-        protected virtual void OnSkillCastCancelFailed(in CastSkillContext context, in OperationResult reason) =>
-            context.skill.OnCastCancelFailed(context, reason);
 
 #endregion
     }
