@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using JetBrains.Annotations;
 using Systems.SimpleCore.Operations;
 using Systems.SimpleCore.Utility.Enums;
