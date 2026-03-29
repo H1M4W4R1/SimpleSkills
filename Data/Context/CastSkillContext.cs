@@ -5,7 +5,13 @@ using Systems.SimpleSkills.Data.Enums;
 
 namespace Systems.SimpleSkills.Data.Context
 {
-    public readonly ref struct CastSkillContext 
+    /// <remarks>
+    ///     This is a <c>ref struct</c> for performance (stack-only, no GC allocation).
+    ///     As a consequence it cannot be captured in lambdas, stored in collections,
+    ///     used with async/await, or passed to C# events/delegates (e.g. <c>System.Action&lt;CastSkillContext&gt;</c>).
+    ///     If deferred processing is needed, copy the relevant fields into a regular struct first.
+    /// </remarks>
+    public readonly ref struct CastSkillContext
     {
         /// <summary>
         ///     Object that casts the skill

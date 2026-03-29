@@ -23,8 +23,21 @@ namespace Systems.SimpleSkills.Data.Abstract
         ///     Checks if skill has cooldown
         /// </summary>
         public bool HasCooldown => CooldownTime > 0;
-        
-            
+
+        /// <summary>
+        ///     Maximum number of concurrent stacks allowed when <see cref="SkillCastFlags.AllowStacking"/> is set.
+        ///     Default is 1 (no stacking). Override to allow multiple concurrent casts.
+        /// </summary>
+        public virtual int MaxStacks => 1;
+
+        /// <summary>
+        ///     Cooldown duration multiplier applied when the skill is interrupted or cancelled.
+        ///     Override to reduce or eliminate cooldown on interrupt (e.g., return 0 for no cooldown).
+        ///     Default is 1 (full cooldown).
+        /// </summary>
+        public virtual float InterruptedCooldownMultiplier => 1f;
+
+
         /// <summary>
         ///     Checks if the <paramref name="context"/> skill is available to be casted.
         /// </summary>
@@ -43,7 +56,7 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill has enough resources to be casted.</returns>
-        protected internal OperationResult HasEnoughResources(in CastSkillContext context) 
+        protected internal virtual OperationResult HasEnoughResources(in CastSkillContext context)
             => SkillOperations.Permitted();
         
         /// <summary>
@@ -64,7 +77,17 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// <param name="context">The <see cref="CastSkillContext"/> to consume resources for.</param>
         protected internal virtual void ConsumeResources(in CastSkillContext context)
         {
-            
+
+        }
+
+        /// <summary>
+        ///     Refunds the resources that were consumed for the skill cast.
+        ///     Called when a cast attempt fails and <see cref="SkillCastFlags.RefundResourcesOnFailure"/> is set.
+        /// </summary>
+        /// <param name="context">The <see cref="CastSkillContext"/> to refund resources for.</param>
+        protected internal virtual void RefundResources(in CastSkillContext context)
+        {
+
         }
         
         

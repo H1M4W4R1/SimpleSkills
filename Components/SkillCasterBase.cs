@@ -9,7 +9,6 @@ using Systems.SimpleSkills.Data.Enums;
 using Systems.SimpleSkills.Data.Internal;
 using Systems.SimpleSkills.Operations;
 using UnityEngine;
-using UnityEngine.Assertions;
 
 namespace Systems.SimpleSkills.Components
 {
@@ -45,7 +44,8 @@ namespace Systems.SimpleSkills.Components
         /// </summary>
         protected void HandleCharging(float deltaTime)
         {
-            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            // Iterate in reverse for safety — new skills added by event handlers start iterating next cycle
+            for (int i = currentlyCastedSkills.Count - 1; i >= 0; i--)
             {
                 CastedSkillReference castedSkillReference = currentlyCastedSkills[i];
 
@@ -78,7 +78,8 @@ namespace Systems.SimpleSkills.Components
         /// </summary>
         protected void HandleChanneling(float deltaTime)
         {
-            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            // Iterate in reverse for safety — new skills added by event handlers start iterating next cycle
+            for (int i = currentlyCastedSkills.Count - 1; i >= 0; i--)
             {
                 CastedSkillReference castedSkillReference = currentlyCastedSkills[i];
                 if (castedSkillReference.skill is not ChannelingSkillBase channelingSkill) continue;
@@ -111,7 +112,7 @@ namespace Systems.SimpleSkills.Components
         /// </summary>
         protected void HandleSkillsCompleted(float deltaTime)
         {
-            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            for (int i = currentlyCastedSkills.Count - 1; i >= 0; i--)
             {
                 CastedSkillReference castedSkillReference = currentlyCastedSkills[i];
 
@@ -125,7 +126,22 @@ namespace Systems.SimpleSkills.Components
                 if (castedSkillReference.skillState == SkillState.Complete)
                     OnSkillCastEnd(GetCastedSkillContextFor(i));
 
+                // Skip cooldown for interrupted/cancelled skills when flag or multiplier says so
+                bool wasInterrupted = castedSkillReference.skillState is SkillState.Interrupted or SkillState.Cancelled;
+                if (wasInterrupted)
+                {
+                    bool noCooldownFlag = (castedSkillReference.flags & SkillCastFlags.NoCooldownOnInterrupt) != 0;
+                    bool zeroCooldownMultiplier = castedSkillReference.skill.InterruptedCooldownMultiplier <= 0f;
+
+                    if (noCooldownFlag || zeroCooldownMultiplier)
+                    {
+                        ClearCastedSkillDataAt(i);
+                        continue;
+                    }
+                }
+
                 // Update data
+                castedSkillReference.wasInterrupted = wasInterrupted;
                 castedSkillReference.skillState = SkillState.Cooldown;
                 currentlyCastedSkills[i] = castedSkillReference;
             }
@@ -145,8 +161,13 @@ namespace Systems.SimpleSkills.Components
                 castedSkillReference.cooldownTimer += deltaTime;
                 currentlyCastedSkills[i] = castedSkillReference;
 
+                // Apply interrupted cooldown multiplier if applicable
+                float effectiveCooldown = castedSkillReference.skill.CooldownTime;
+                if (castedSkillReference.wasInterrupted)
+                    effectiveCooldown *= castedSkillReference.skill.InterruptedCooldownMultiplier;
+
                 // Clear casted skill context if cooldown is finished
-                if (castedSkillReference.cooldownTimer >= castedSkillReference.skill.CooldownTime)
+                if (castedSkillReference.cooldownTimer >= effectiveCooldown)
                     ClearCastedSkillDataAt(i);
             }
         }
@@ -168,7 +189,7 @@ namespace Systems.SimpleSkills.Components
             where TSkill : SkillBase, new()
         {
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
-            Assert.IsNotNull(skill, "Skill was not found in database");
+            if (ReferenceEquals(skill, null)) return SkillOperations.SkillNotFound();
             return TryCastSkill(skill, flags, actionSource);
         }
 
@@ -217,6 +238,23 @@ namespace Systems.SimpleSkills.Components
                 return isSkillOnCooldownCheck;
             }
 
+            // Check if skill is already being cast (charging/channeling)
+            OperationResult isSkillAlreadyActiveCheck = IsSkillAlreadyActive(context);
+            if (!isSkillAlreadyActiveCheck)
+            {
+                // If ResetOnRecast is set, reset the existing skill state instead of blocking
+                if ((context.flags & SkillCastFlags.ResetOnRecast) != 0)
+                {
+                    ResetActiveSkill(context.skill);
+                }
+                else
+                {
+                    if (actionSource == ActionSource.Internal) return isSkillAlreadyActiveCheck;
+                    OnSkillCastFailed(context, isSkillAlreadyActiveCheck);
+                    return isSkillAlreadyActiveCheck;
+                }
+            }
+
             // Check if caster has enough resources
             OperationResult hasEnoughSkillResourcesCheck = HasEnoughSkillResources(context);
             if (!hasEnoughSkillResourcesCheck && (context.flags & SkillCastFlags.IgnoreCosts) == 0)
@@ -227,13 +265,21 @@ namespace Systems.SimpleSkills.Components
             }
 
             // Consume skill resources if flag is not set
+            bool resourcesConsumed = false;
             if((context.flags & SkillCastFlags.DoNotConsumeResources) == 0)
+            {
                 ConsumeSkillResources(context);
+                resourcesConsumed = true;
+            }
 
             // Check if cast can be performed
             OperationResult canSkillBeCastedCheck = CheckCastAttemptSuccess(context);
             if (!canSkillBeCastedCheck && (context.flags & SkillCastFlags.IgnoreRequirements) == 0)
             {
+                // Refund resources if flag is set and resources were consumed
+                if (resourcesConsumed && (context.flags & SkillCastFlags.RefundResourcesOnFailure) != 0)
+                    RefundSkillResources(context);
+
                 if (actionSource == ActionSource.Internal) return canSkillBeCastedCheck;
                 OnSkillCastFailed(context, canSkillBeCastedCheck);
                 return canSkillBeCastedCheck;
@@ -257,7 +303,7 @@ namespace Systems.SimpleSkills.Components
             where TSkill : SkillBase, new()
         {
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
-            Assert.IsNotNull(skill, "Skill was not found in database");
+            if (ReferenceEquals(skill, null)) return SkillOperations.SkillNotFound();
             return TryCancelSkill(skill, flags, actionSource);
         }
 
@@ -292,7 +338,7 @@ namespace Systems.SimpleSkills.Components
             where TSkill : SkillBase, new()
         {
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
-            Assert.IsNotNull(skill, "Skill was not found in database");
+            if (ReferenceEquals(skill, null)) return SkillOperations.SkillNotFound();
             return TryInterruptSkill(skill, source, flags, actionSource);
         }
 
@@ -325,8 +371,7 @@ namespace Systems.SimpleSkills.Components
             ActionSource actionSource = ActionSource.External)
         {
             // Ensure skill is casted
-            CastedSkillReference? skillData = GetCastedSkillDataFor(context.skill);
-            if (skillData is null)
+            if (!TryGetCastedSkillDataFor(context.skill, out CastedSkillReference skillData))
             {
                 OperationResult opResult = SkillOperations.SkillNotCasted();
                 if (actionSource == ActionSource.Internal) return opResult;
@@ -335,7 +380,7 @@ namespace Systems.SimpleSkills.Components
             }
 
             // Check if skill is on cooldown
-            if (skillData.Value.IsOnCooldown)
+            if (skillData.IsOnCooldown)
             {
                 OperationResult opResult = SkillOperations.CooldownNotFinished();
                 if (actionSource == ActionSource.Internal) return opResult;
@@ -352,9 +397,8 @@ namespace Systems.SimpleSkills.Components
             }
 
             // Update casted skill data
-            CastedSkillReference skillReferenceValue = skillData.Value;
-            skillReferenceValue.skillState = SkillState.Interrupted;
-            UpdateCastedSkillDataFor(context.skill, skillReferenceValue);
+            skillData.skillState = SkillState.Interrupted;
+            UpdateCastedSkillDataFor(context.skill, skillData);
 
             // Execute events
             if (actionSource == ActionSource.Internal) return canSkillBeInterruptedCheck;
@@ -377,13 +421,28 @@ namespace Systems.SimpleSkills.Components
         public IReadOnlyList<CastedSkillReference> CurrentlyCastedSkills => currentlyCastedSkills;
 
         /// <summary>
-        ///     Register casted skill in list
+        ///     Register casted skill in list. For instant-cast skills (ChargingTime &lt;= 0),
+        ///     skips the Charging state and fires OnSkillCastStart immediately.
         /// </summary>
         private void RegisterCastedDataFor(in CastSkillContext context)
         {
             // Convert context to casted skill data
             CastedSkillReference castedSkillReference = new(context.skill, context.flags);
-            currentlyCastedSkills.Add(castedSkillReference);
+
+            // Skip charging for instant-cast skills
+            if (context.skill.ChargingTime <= 0)
+            {
+                castedSkillReference.skillState = context.skill is ChannelingSkillBase
+                    ? SkillState.Channeling
+                    : SkillState.Complete;
+
+                currentlyCastedSkills.Add(castedSkillReference);
+                OnSkillCastStart(context);
+            }
+            else
+            {
+                currentlyCastedSkills.Add(castedSkillReference);
+            }
         }
 
         /// <summary>
@@ -412,8 +471,10 @@ namespace Systems.SimpleSkills.Components
             where TSkill : SkillBase, new()
         {
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
-            Assert.IsNotNull(skill, "Skill was not found in database");
-            return TryGetCastedSkillDataFor(skill, out castedSkillReference);
+            if (!ReferenceEquals(skill, null)) return TryGetCastedSkillDataFor(skill, out castedSkillReference);
+            
+            castedSkillReference = default;
+            return false;
         }
 
         /// <summary>
@@ -423,12 +484,14 @@ namespace Systems.SimpleSkills.Components
             [NotNull] SkillBase skill,
             out CastedSkillReference castedSkillReference)
         {
-            castedSkillReference = default;
+            for (int index = 0; index < currentlyCastedSkills.Count; index++)
+            {
+                castedSkillReference = currentlyCastedSkills[index];
+                if (ReferenceEquals(castedSkillReference.skill, skill)) return true;
+            }
 
-            CastedSkillReference? internalResult = GetCastedSkillDataFor(skill);
-            if (internalResult is null) return false;
-            castedSkillReference = internalResult.Value;
-            return true;
+            castedSkillReference = default;
+            return false;
         }
 
         /// <summary>
@@ -442,25 +505,6 @@ namespace Systems.SimpleSkills.Components
                 currentlyCastedSkills[index].flags);
         }
 
-        
-        /// <summary>
-        ///     Tries to get the <see cref="CastedSkillReference"/> for the given <paramref name="skill"/>.
-        /// </summary>
-        /// <param name="skill">The <see cref="SkillBase"/> to find the casted data for.</param>
-        /// <returns>The <see cref="CastedSkillReference"/> if found, otherwise <see langword="null"/>.</returns>
-        /// <remarks>
-        ///     This method uses reference equality to find the casted skill data.
-        /// </remarks>
-        private CastedSkillReference? GetCastedSkillDataFor([NotNull] SkillBase skill)
-        {
-            for (int index = 0; index < currentlyCastedSkills.Count; index++)
-            {
-                CastedSkillReference castedSkillReference = currentlyCastedSkills[index];
-                if (ReferenceEquals(castedSkillReference.skill, skill)) return castedSkillReference;
-            }
-
-            return null;
-        }
 
 #endregion
 
@@ -490,11 +534,11 @@ namespace Systems.SimpleSkills.Components
             if (!context.skill.HasCooldown) return SkillOperations.Permitted();
 
             // If skill is not casted, it is not on cooldown
-            CastedSkillReference? data = GetCastedSkillDataFor(context.skill);
-            if (data is null) return SkillOperations.Permitted();
+            if (!TryGetCastedSkillDataFor(context.skill, out CastedSkillReference data))
+                return SkillOperations.Permitted();
 
             // If skill is casted, check if it is on cooldown
-            return data.Value.IsOnCooldown ? SkillOperations.CooldownNotFinished() : SkillOperations.Permitted();
+            return data.IsOnCooldown ? SkillOperations.CooldownNotFinished() : SkillOperations.Permitted();
         }
 
         
@@ -520,6 +564,63 @@ namespace Systems.SimpleSkills.Components
             context.skill.CheckAttemptSuccess(context);
 
         /// <summary>
+        ///     Checks if the <paramref name="context"/> skill is already actively being cast
+        ///     (charging, channeling, or complete but not yet on cooldown).
+        ///     Respects <see cref="SkillCastFlags.AllowStacking"/> and <see cref="SkillBase.MaxStacks"/>.
+        /// </summary>
+        /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
+        /// <returns>An <see cref="OperationResult"/> indicating whether the skill can be cast.</returns>
+        protected virtual OperationResult IsSkillAlreadyActive(in CastSkillContext context)
+        {
+            int activeCount = GetActiveStackCount(context.skill);
+            if (activeCount == 0) return SkillOperations.Permitted();
+
+            // Allow stacking if flag is set and under max stacks
+            if ((context.flags & SkillCastFlags.AllowStacking) != 0)
+            {
+                return activeCount < context.skill.MaxStacks
+                    ? SkillOperations.Permitted()
+                    : SkillOperations.SkillMaxStacks();
+            }
+
+            return SkillOperations.SkillAlreadyActive();
+        }
+
+        /// <summary>
+        ///     Returns the number of active (non-cooldown, non-removed) casts for the given skill.
+        /// </summary>
+        protected int GetActiveStackCount([NotNull] SkillBase skill)
+        {
+            int count = 0;
+            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            {
+                CastedSkillReference entry = currentlyCastedSkills[i];
+                if (!ReferenceEquals(entry.skill, skill)) continue;
+                if (entry.skillState is SkillState.Charging or SkillState.Channeling or SkillState.Complete)
+                    count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        ///     Resets an active skill's state by interrupting it. Used when <see cref="SkillCastFlags.ResetOnRecast"/> is set.
+        /// </summary>
+        private void ResetActiveSkill([NotNull] SkillBase skill)
+        {
+            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            {
+                CastedSkillReference entry = currentlyCastedSkills[i];
+                if (!ReferenceEquals(entry.skill, skill)) continue;
+                if (entry.skillState is SkillState.Charging or SkillState.Channeling or SkillState.Complete)
+                {
+                    entry.skillState = SkillState.Cancelled;
+                    currentlyCastedSkills[i] = entry;
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
         ///     Checks if the <paramref name="context"/> skill can be interrupted.
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
@@ -538,6 +639,13 @@ namespace Systems.SimpleSkills.Components
         /// <param name="context">The <see cref="CastSkillContext"/> to consume resources for.</param>
         protected virtual void ConsumeSkillResources(in CastSkillContext context) =>
             context.skill.ConsumeResources(context);
+
+        /// <summary>
+        ///     Refunds the resources that were consumed for the skill cast.
+        /// </summary>
+        /// <param name="context">The <see cref="CastSkillContext"/> to refund resources for.</param>
+        protected virtual void RefundSkillResources(in CastSkillContext context) =>
+            context.skill.RefundResources(context);
 
         /// <summary>
         ///     Event raised when the skill cast has started.
@@ -571,13 +679,8 @@ namespace Systems.SimpleSkills.Components
         /// <remarks>
         ///     This method is called every tick while the skill is channeling.
         /// </remarks>
-        protected virtual void OnSkillTickWhenChanneling(in CastSkillContext context)
-        {
-            if (context.skill is ChannelingSkillBase channelingSkillBase)
-                channelingSkillBase.OnCastTickWhenChanneling(context);
-            else
-                Debug.LogError($"Skill {context.skill.name} is not a channeling skill");
-        }
+        protected virtual void OnSkillTickWhenChanneling(in CastSkillContext context) =>
+            ((ChannelingSkillBase) context.skill).OnCastTickWhenChanneling(context);
 
         /// <summary>
         ///     Event raised when the skill cast has ended.

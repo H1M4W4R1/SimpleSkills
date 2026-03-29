@@ -37,6 +37,12 @@ namespace Systems.SimpleSkills.Data.Internal
         /// </summary>
         public SkillState skillState;
 
+        /// <summary>
+        ///     Whether this skill was interrupted or cancelled before entering cooldown.
+        ///     Used to apply <see cref="SkillBase.InterruptedCooldownMultiplier"/>.
+        /// </summary>
+        public bool wasInterrupted;
+
         public CastedSkillReference([NotNull] SkillBase contextSkill, SkillCastFlags flags)
         {
             skill = contextSkill;
@@ -44,6 +50,7 @@ namespace Systems.SimpleSkills.Data.Internal
             channelingTimer = 0;
             cooldownTimer = 0;
             skillState = SkillState.Charging;
+            wasInterrupted = false;
             this.flags = flags;
         }
 
@@ -113,15 +120,17 @@ namespace Systems.SimpleSkills.Data.Internal
             skill.ChargingTime > 0 ? skill.ChargingTime - chargingTimer : -1;
 
         /// <summary>
-        ///     Skill channeling time, returns -1 if skill is not a channeling skill
+        ///     Skill channeling total duration, returns -1 if skill is not a channeling skill or is infinite
         /// </summary>
-        public float ChannelingTime => skill is ChannelingSkillBase ? channelingTimer : -1;
+        public float ChannelingTime => skill is ChannelingSkillBase channelingSkill
+            ? channelingSkill.Duration > 0 ? channelingSkill.Duration : -1
+            : -1;
 
         /// <summary>
-        ///     Skill channeling time left, returns -1 if skill is not a channeling skill
+        ///     Skill channeling time left, returns -1 if skill is not a channeling skill or is infinite
         /// </summary>
         public float ChannelingTimeLeft => skill is ChannelingSkillBase channelingSkill
-            ? channelingSkill.Duration - channelingTimer
+            ? channelingSkill.IsInfinite ? -1 : channelingSkill.Duration - channelingTimer
             : -1;
 
         /// <summary>
