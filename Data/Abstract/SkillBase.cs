@@ -1,6 +1,7 @@
 ﻿using Systems.SimpleCore.Automation.Attributes;
 using Systems.SimpleCore.Operations;
 using Systems.SimpleSkills.Data.Context;
+using Systems.SimpleSkills.Data.Enums;
 using Systems.SimpleSkills.Operations;
 using UnityEngine;
 
@@ -12,13 +13,13 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// <summary>
         ///     Skill charging time
         /// </summary>
-        public virtual float ChargingTime { get; } = 0f;
+        public virtual float ChargingTime => 0f;
 
         /// <summary>
         ///     Skill cooldown time
         /// </summary>
-        public virtual float CooldownTime { get; } = 0f;
-        
+        public virtual float CooldownTime => 0f;
+
         /// <summary>
         ///     Checks if skill has cooldown
         /// </summary>

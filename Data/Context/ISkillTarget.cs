@@ -7,7 +7,7 @@ namespace Systems.SimpleSkills.Data.Context
     /// <example>
     ///     <code>
     ///     public class Enemy : MonoBehaviour, ISkillTarget { }
-    ///     public class WorldPosition : ISkillTarget { public Vector3 Position; }
+    ///     public struct WorldPosition : ISkillTarget { public Vector3 Position; }
     ///     </code>
     /// </example>
     public interface ISkillTarget
