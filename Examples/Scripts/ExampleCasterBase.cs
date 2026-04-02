@@ -9,13 +9,13 @@ namespace Systems.SimpleSkills.Examples.Scripts
         [ContextMenu("Cast channeling skill")]
         public void CastChannelingSkill()
         {
-            TryCastSkill<ExampleChannelingSkill>();
+            TryCastSkill<ExampleIChannelingSkill>();
         }
         
         [ContextMenu("Cancel channeling skill")]
         public void CancelChannelingSkill()
         {
-            if(OperationResult.IsError(TryCancelSkill<ExampleChannelingSkill>()))
+            if(OperationResult.IsError(TryCancelSkill<ExampleIChannelingSkill>()))
                Debug.LogError("Failed to cancel channeling skill");
             else Debug.Log("Channeling skill cancelled");
         }
@@ -23,7 +23,7 @@ namespace Systems.SimpleSkills.Examples.Scripts
         [ContextMenu("Interrupt channeling skill")]
         public void InterruptChannelingSkill()
         {
-            if(OperationResult.IsError(TryInterruptSkill<ExampleChannelingSkill>(null)))
+            if(OperationResult.IsError(TryInterruptSkill<ExampleIChannelingSkill>(null)))
                Debug.LogError("Failed to interrupt channeling skill");
             else Debug.Log("Channeling skill interrupted");
         }

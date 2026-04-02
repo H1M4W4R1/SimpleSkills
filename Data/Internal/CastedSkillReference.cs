@@ -1,5 +1,7 @@
-﻿using JetBrains.Annotations;
+using System.Runtime.CompilerServices;
+using JetBrains.Annotations;
 using Systems.SimpleSkills.Data.Abstract;
+using Systems.SimpleSkills.Data.Context;
 using Systems.SimpleSkills.Data.Enums;
 using Unity.Mathematics;
 
@@ -33,9 +35,9 @@ namespace Systems.SimpleSkills.Data.Internal
         public float cooldownTimer;
 
         /// <summary>
-        ///     State of the skill
+        ///     State machine managing skill cast transitions
         /// </summary>
-        public SkillState skillState;
+        public SkillCastStateMachine stateMachine;
 
         /// <summary>
         ///     Whether this skill was interrupted or cancelled before entering cooldown.
@@ -43,15 +45,33 @@ namespace Systems.SimpleSkills.Data.Internal
         /// </summary>
         public bool wasInterrupted;
 
-        public CastedSkillReference([NotNull] SkillBase contextSkill, SkillCastFlags flags)
+        /// <summary>
+        ///     Optional target for this skill cast. Stored so it's available during tick callbacks.
+        /// </summary>
+        [CanBeNull] public readonly ISkillTarget target;
+
+        /// <summary>
+        ///     State of the skill. Delegates to the state machine.
+        /// </summary>
+        public SkillState skillState
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => stateMachine.CurrentState;
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            set => stateMachine.ForceTransitionTo(value);
+        }
+
+        public CastedSkillReference([NotNull] SkillBase contextSkill, SkillCastFlags flags,
+            [CanBeNull] ISkillTarget target = null)
         {
             skill = contextSkill;
             chargingTimer = 0;
             channelingTimer = 0;
             cooldownTimer = 0;
-            skillState = SkillState.Charging;
+            stateMachine = new SkillCastStateMachine(SkillState.Charging);
             wasInterrupted = false;
             this.flags = flags;
+            this.target = target;
         }
 
         /// <summary>
@@ -90,7 +110,7 @@ namespace Systems.SimpleSkills.Data.Internal
         {
             get
             {
-                if (skill is not ChannelingSkillBase channelingSkill) return 1;
+                if (skill is not IChannelingSkillBase channelingSkill) return 1;
                 if (channelingSkill.Duration <= 0) return -1;
                 return math.clamp(channelingTimer / channelingSkill.Duration, 0, 1);
             }
@@ -122,14 +142,14 @@ namespace Systems.SimpleSkills.Data.Internal
         /// <summary>
         ///     Skill channeling total duration, returns -1 if skill is not a channeling skill or is infinite
         /// </summary>
-        public float ChannelingTime => skill is ChannelingSkillBase channelingSkill
+        public float ChannelingTime => skill is IChannelingSkillBase channelingSkill
             ? channelingSkill.Duration > 0 ? channelingSkill.Duration : -1
             : -1;
 
         /// <summary>
         ///     Skill channeling time left, returns -1 if skill is not a channeling skill or is infinite
         /// </summary>
-        public float ChannelingTimeLeft => skill is ChannelingSkillBase channelingSkill
+        public float ChannelingTimeLeft => skill is IChannelingSkillBase channelingSkill
             ? channelingSkill.IsInfinite ? -1 : channelingSkill.Duration - channelingTimer
             : -1;
 

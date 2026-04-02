@@ -6,9 +6,9 @@ using UnityEngine;
 
 namespace Systems.SimpleSkills.Examples.Scripts
 {
-    public sealed class ExampleChannelingSkill : ChannelingSkillBase
+    public sealed class ExampleIChannelingSkill : SkillBase, IChannelingSkillBase
     {
-        public override float Duration => 10f;
+        public float Duration => 10f;
 
         public override float CooldownTime => 1f;
 
@@ -40,9 +40,8 @@ namespace Systems.SimpleSkills.Examples.Scripts
                 Debug.Log($"Skill {name} failed for {context.caster.name} because cooldown is not finished");
         }
 
-        protected internal override void OnCastTickWhenChanneling(in CastSkillContext context)
+        void IChannelingSkillBase.OnCastTickWhenChanneling(in CastSkillContext context)
         {
-            base.OnCastTickWhenChanneling(in context);
             Debug.Log($"Skill {name} is channeling for {context.caster.name}");
         }
     }

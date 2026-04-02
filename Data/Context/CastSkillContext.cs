@@ -1,4 +1,4 @@
-﻿using JetBrains.Annotations;
+using JetBrains.Annotations;
 using Systems.SimpleSkills.Components;
 using Systems.SimpleSkills.Data.Abstract;
 using Systems.SimpleSkills.Data.Enums;
@@ -17,22 +17,41 @@ namespace Systems.SimpleSkills.Data.Context
         ///     Object that casts the skill
         /// </summary>
         [NotNull] public readonly SkillCasterBase caster;
-        
+
         /// <summary>
         ///     Skill reference
         /// </summary>
         [NotNull] public readonly SkillBase skill;
-        
+
         /// <summary>
         ///     Flags
         /// </summary>
         public readonly SkillCastFlags flags;
+
+        /// <summary>
+        ///     Optional target for targeted skills. Set before calling TryCastSkill.
+        ///     Null for non-targeted or self-cast skills.
+        /// </summary>
+        [CanBeNull] public readonly ISkillTarget target;
 
         public CastSkillContext([NotNull] SkillCasterBase caster, [NotNull] SkillBase skill, SkillCastFlags flags)
         {
             this.caster = caster;
             this.skill = skill;
             this.flags = flags;
+            target = null;
+        }
+
+        public CastSkillContext(
+            [NotNull] SkillCasterBase caster,
+            [NotNull] SkillBase skill,
+            SkillCastFlags flags,
+            [CanBeNull] ISkillTarget target)
+        {
+            this.caster = caster;
+            this.skill = skill;
+            this.flags = flags;
+            this.target = target;
         }
     }
 }

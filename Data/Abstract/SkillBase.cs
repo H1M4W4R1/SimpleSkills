@@ -37,6 +37,12 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// </summary>
         public virtual float InterruptedCooldownMultiplier => 1f;
 
+        /// <summary>
+        ///     Whether this skill requires a target to be cast.
+        ///     When true, <see cref="CastSkillContext.target"/> must be non-null.
+        /// </summary>
+        public virtual bool RequiresTarget => false;
+
 
         /// <summary>
         ///     Checks if the <paramref name="context"/> skill is available to be casted.
@@ -173,7 +179,31 @@ namespace Systems.SimpleSkills.Data.Abstract
         /// </remarks>
         protected internal virtual void OnCastInterruptFailed(in InterruptSkillContext context, in OperationResult reason)
         {
-            
+
+        }
+
+        /// <summary>
+        ///     Event raised each tick while the skill is on cooldown.
+        /// </summary>
+        /// <param name="context">The <see cref="CastSkillContext"/> of the skill on cooldown.</param>
+        protected internal virtual void OnCooldownTick(in CastSkillContext context)
+        {
+        }
+
+        /// <summary>
+        ///     Event raised when the skill cast is registered (added to the active cast list).
+        /// </summary>
+        /// <param name="context">The <see cref="CastSkillContext"/> of the registered skill.</param>
+        protected internal virtual void OnCastRegistered(in CastSkillContext context)
+        {
+        }
+
+        /// <summary>
+        ///     Event raised when the skill cast is removed from the active cast list.
+        /// </summary>
+        /// <param name="context">The <see cref="CastSkillContext"/> of the removed skill.</param>
+        protected internal virtual void OnCastRemoved(in CastSkillContext context)
+        {
         }
     }
 }

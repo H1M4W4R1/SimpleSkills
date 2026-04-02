@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
 using JetBrains.Annotations;
 using Systems.SimpleCore.Operations;
 using Systems.SimpleCore.Utility.Enums;
@@ -37,6 +38,8 @@ namespace Systems.SimpleSkills.Components
             HandleChanneling(deltaTime);
             HandleSkillsCompleted(deltaTime);
             HandleCooldowns(deltaTime);
+            HandleGroupCooldowns(deltaTime);
+            HandlePassiveTicks(deltaTime);
         }
 
         /// <summary>
@@ -60,9 +63,11 @@ namespace Systems.SimpleSkills.Components
                 OnSkillTickWhenCharging(skillCastContext);
                 if (castedSkillReference.chargingTimer >= castedSkillReference.skill.ChargingTime)
                 {
-                    castedSkillReference.skillState = castedSkillReference.skill is ChannelingSkillBase
+                    SkillState nextState = castedSkillReference.skill is IChannelingSkillBase
                         ? SkillState.Channeling
                         : SkillState.Complete;
+
+                    castedSkillReference.stateMachine.TryTransitionTo(nextState);
 
                     // We start casting the skill
                     OnSkillCastStart(skillCastContext);
@@ -82,7 +87,7 @@ namespace Systems.SimpleSkills.Components
             for (int i = currentlyCastedSkills.Count - 1; i >= 0; i--)
             {
                 CastedSkillReference castedSkillReference = currentlyCastedSkills[i];
-                if (castedSkillReference.skill is not ChannelingSkillBase channelingSkill) continue;
+                if (castedSkillReference.skill is not IChannelingSkillBase channelingSkill) continue;
 
                 // Skill has to be charged
                 if (!castedSkillReference.IsChargingComplete) continue;
@@ -100,7 +105,7 @@ namespace Systems.SimpleSkills.Components
 
                 if (castedSkillReference.channelingTimer >= channelingSkill.Duration &&
                     !channelingSkill.IsInfinite)
-                    castedSkillReference.skillState = SkillState.Complete;
+                    castedSkillReference.stateMachine.TryTransitionTo(SkillState.Complete);
 
                 currentlyCastedSkills[i] = castedSkillReference;
             }
@@ -142,7 +147,7 @@ namespace Systems.SimpleSkills.Components
 
                 // Update data
                 castedSkillReference.wasInterrupted = wasInterrupted;
-                castedSkillReference.skillState = SkillState.Cooldown;
+                castedSkillReference.stateMachine.TryTransitionTo(SkillState.Cooldown);
                 currentlyCastedSkills[i] = castedSkillReference;
             }
         }
@@ -160,6 +165,8 @@ namespace Systems.SimpleSkills.Components
 
                 castedSkillReference.cooldownTimer += deltaTime;
                 currentlyCastedSkills[i] = castedSkillReference;
+
+                OnSkillCooldownTick(GetCastedSkillContextFor(i));
 
                 // Apply interrupted cooldown multiplier if applicable
                 float effectiveCooldown = castedSkillReference.skill.CooldownTime;
@@ -220,73 +227,153 @@ namespace Systems.SimpleSkills.Components
             in CastSkillContext context,
             ActionSource actionSource = ActionSource.External)
         {
+            // Resolve skill level if applicable
+            SkillBase resolvedSkill = context.skill;
+            if (resolvedSkill is ISkillWithLevels leveledSkill)
+            {
+                int level = GetSkillLevel(leveledSkill);
+                resolvedSkill = leveledSkill.GetSkillForLevel(level);
+            }
+            
+            // Ensure if skill was resolved correctly, level may not exist if somebody made
+            // a mistake during configuration
+            if (ReferenceEquals(resolvedSkill, null))
+                return SkillOperations.SkillNotFound();
+
+            // Deactivate passive if this passive is active
+            if (IsSkillActivated(resolvedSkill))
+            {
+                DeactivateSkill(resolvedSkill);
+                return SkillOperations.SkillDeactivated();
+            }
+
+            // Create resolved context (may differ from input if level was resolved)
+            CastSkillContext resolvedContext = ReferenceEquals(resolvedSkill, context.skill)
+                ? context
+                : new CastSkillContext(context.caster, resolvedSkill, context.flags, context.target);
+
+            // Check if skill requires a target
+            if (resolvedContext.skill.RequiresTarget && resolvedContext.target == null)
+            {
+                OperationResult noTargetResult = SkillOperations.NoTargetSelected();
+                if (actionSource == ActionSource.Internal) return noTargetResult;
+                OnSkillCastFailed(resolvedContext, noTargetResult);
+                return noTargetResult;
+            }
+
             // Check if skill is available for caster
-            OperationResult isSkillAvailableCheck = IsSkillAvailable(context);
-            if (!isSkillAvailableCheck && (context.flags & SkillCastFlags.IgnoreAvailability) == 0)
+            OperationResult isSkillAvailableCheck = IsSkillAvailable(resolvedContext);
+            if (!isSkillAvailableCheck && (resolvedContext.flags & SkillCastFlags.IgnoreAvailability) == 0)
             {
                 if (actionSource == ActionSource.Internal) return isSkillAvailableCheck;
-                OnSkillCastFailed(context, isSkillAvailableCheck);
+                OnSkillCastFailed(resolvedContext, isSkillAvailableCheck);
                 return isSkillAvailableCheck;
             }
 
             // Check if skill is on cooldown for this caster
-            OperationResult isSkillOnCooldownCheck = IsSkillOnCooldown(context);
-            if (!isSkillOnCooldownCheck && (context.flags & SkillCastFlags.IgnoreCooldown) == 0)
+            OperationResult isSkillOnCooldownCheck = IsSkillOnCooldown(resolvedContext);
+            if (!isSkillOnCooldownCheck && (resolvedContext.flags & SkillCastFlags.IgnoreCooldown) == 0)
             {
                 if (actionSource == ActionSource.Internal) return isSkillOnCooldownCheck;
-                OnSkillCastFailed(context, isSkillOnCooldownCheck);
+                OnSkillCastFailed(resolvedContext, isSkillOnCooldownCheck);
                 return isSkillOnCooldownCheck;
             }
 
-            // Check if skill is already being cast (charging/channeling)
-            OperationResult isSkillAlreadyActiveCheck = IsSkillAlreadyActive(context);
-            if (!isSkillAlreadyActiveCheck)
+            // Check if skill group is on cooldown
+            OperationResult groupCooldownCheck = IsSkillGroupOnCooldown(resolvedContext);
+            if (!groupCooldownCheck && (resolvedContext.flags & SkillCastFlags.IgnoreCooldown) == 0)
             {
-                // If ResetOnRecast is set, reset the existing skill state instead of blocking
-                if ((context.flags & SkillCastFlags.ResetOnRecast) != 0)
+                if (actionSource == ActionSource.Internal) return groupCooldownCheck;
+                OnSkillCastFailed(resolvedContext, groupCooldownCheck);
+                return groupCooldownCheck;
+            }
+
+            // Check if skill has available charges
+            if (resolvedContext.skill is ISkillWithCharges {MaxCharges: > 1} chargeSkill)
+            {
+                int availableCharges = GetAvailableCharges(resolvedContext.skill, chargeSkill.MaxCharges);
+                if (availableCharges <= 0 && (resolvedContext.flags & SkillCastFlags.IgnoreCooldown) == 0)
                 {
-                    ResetActiveSkill(context.skill);
+                    OperationResult noChargesResult = SkillOperations.NoChargesAvailable();
+                    if (actionSource == ActionSource.Internal) return noChargesResult;
+                    OnSkillCastFailed(resolvedContext, noChargesResult);
+                    return noChargesResult;
                 }
-                else
+            }
+            else
+            {
+                // Standard active check for non-charge skills
+                OperationResult isSkillAlreadyActiveCheck = IsSkillAlreadyCast(resolvedContext);
+                if (!isSkillAlreadyActiveCheck)
                 {
-                    if (actionSource == ActionSource.Internal) return isSkillAlreadyActiveCheck;
-                    OnSkillCastFailed(context, isSkillAlreadyActiveCheck);
-                    return isSkillAlreadyActiveCheck;
+                    // If ResetOnRecast is set, reset the existing skill state instead of blocking
+                    if ((resolvedContext.flags & SkillCastFlags.ResetOnRecast) != 0)
+                    {
+                        ResetCastSkill(resolvedContext.skill);
+                    }
+                    else
+                    {
+                        if (actionSource == ActionSource.Internal) return isSkillAlreadyActiveCheck;
+                        OnSkillCastFailed(resolvedContext, isSkillAlreadyActiveCheck);
+                        return isSkillAlreadyActiveCheck;
+                    }
                 }
             }
 
             // Check if caster has enough resources
-            OperationResult hasEnoughSkillResourcesCheck = HasEnoughSkillResources(context);
-            if (!hasEnoughSkillResourcesCheck && (context.flags & SkillCastFlags.IgnoreCosts) == 0)
+            OperationResult hasEnoughSkillResourcesCheck = HasEnoughSkillResources(resolvedContext);
+            if (!hasEnoughSkillResourcesCheck && (resolvedContext.flags & SkillCastFlags.IgnoreCosts) == 0)
             {
                 if (actionSource == ActionSource.Internal) return hasEnoughSkillResourcesCheck;
-                OnSkillCastFailed(context, hasEnoughSkillResourcesCheck);
+                OnSkillCastFailed(resolvedContext, hasEnoughSkillResourcesCheck);
                 return hasEnoughSkillResourcesCheck;
             }
 
             // Consume skill resources if flag is not set
             bool resourcesConsumed = false;
-            if((context.flags & SkillCastFlags.DoNotConsumeResources) == 0)
+            if((resolvedContext.flags & SkillCastFlags.DoNotConsumeResources) == 0)
             {
-                ConsumeSkillResources(context);
+                ConsumeSkillResources(resolvedContext);
                 resourcesConsumed = true;
             }
 
             // Check if cast can be performed
-            OperationResult canSkillBeCastedCheck = CheckCastAttemptSuccess(context);
-            if (!canSkillBeCastedCheck && (context.flags & SkillCastFlags.IgnoreRequirements) == 0)
+            OperationResult canSkillBeCastedCheck = CheckCastAttemptSuccess(resolvedContext);
+            if (!canSkillBeCastedCheck && (resolvedContext.flags & SkillCastFlags.IgnoreRequirements) == 0)
             {
                 // Refund resources if flag is set and resources were consumed
-                if (resourcesConsumed && (context.flags & SkillCastFlags.RefundResourcesOnFailure) != 0)
-                    RefundSkillResources(context);
+                if (resourcesConsumed && (resolvedContext.flags & SkillCastFlags.RefundResourcesOnFailure) != 0)
+                    RefundSkillResources(resolvedContext);
 
                 if (actionSource == ActionSource.Internal) return canSkillBeCastedCheck;
-                OnSkillCastFailed(context, canSkillBeCastedCheck);
+                OnSkillCastFailed(resolvedContext, canSkillBeCastedCheck);
                 return canSkillBeCastedCheck;
             }
 
+            // Clear other levels if activated skill
+            if (resolvedContext.skill is ISkillWithLevels withLevels and IActivatedSkill)
+            {
+                int index = 0;
+                SkillBase skill = withLevels.GetSkillForLevel(index);
+
+                // We check at least 3 indices, because design loves to sabotage projects.
+                while (!ReferenceEquals(skill, null) || index < 3) 
+                {
+                    // We need that check due to minimum index included in loop
+                    if (ReferenceEquals(skill, null)) continue; 
+                    if (IsSkillActivated(skill)) DeactivateSkill(skill);
+                    
+                    index++;
+                    skill = withLevels.GetSkillForLevel(index);
+                }
+            }
+            
             // Execute events
-            RegisterCastedDataFor(context);
+            RegisterCastedDataFor(resolvedContext);
+
+            // Set group cooldown after successful cast
+            SetGroupCooldownForSkill(resolvedContext.skill);
+
             return SkillOperations.Casted();
         }
 
@@ -308,7 +395,7 @@ namespace Systems.SimpleSkills.Components
         }
 
         /// <summary>
-        ///     Tries to cancel casted skill
+        ///     Tries to cancel cast skill
         /// </summary>
         /// <param name="skill">Skill to cancel</param>
         /// <param name="flags">Flags that describe how skill should be casted</param>
@@ -361,7 +448,7 @@ namespace Systems.SimpleSkills.Components
         }
 
         /// <summary>
-        ///     Tries to interrupt casted skill
+        ///     Tries to interrupt cast skill
         /// </summary>
         /// <param name="context">Context of skill cast</param>
         /// <param name="actionSource">Source of action</param>
@@ -397,7 +484,7 @@ namespace Systems.SimpleSkills.Components
             }
 
             // Update casted skill data
-            skillData.skillState = SkillState.Interrupted;
+            skillData.stateMachine.TryTransitionTo(SkillState.Interrupted);
             UpdateCastedSkillDataFor(context.skill, skillData);
 
             // Execute events
@@ -427,21 +514,24 @@ namespace Systems.SimpleSkills.Components
         private void RegisterCastedDataFor(in CastSkillContext context)
         {
             // Convert context to casted skill data
-            CastedSkillReference castedSkillReference = new(context.skill, context.flags);
+            CastedSkillReference castedSkillReference = new(context.skill, context.flags, context.target);
 
             // Skip charging for instant-cast skills
             if (context.skill.ChargingTime <= 0)
             {
-                castedSkillReference.skillState = context.skill is ChannelingSkillBase
+                SkillState nextState = context.skill is IChannelingSkillBase
                     ? SkillState.Channeling
                     : SkillState.Complete;
+                castedSkillReference.stateMachine.TryTransitionTo(nextState);
 
                 currentlyCastedSkills.Add(castedSkillReference);
+                OnSkillCastRegistered(context);
                 OnSkillCastStart(context);
             }
             else
             {
                 currentlyCastedSkills.Add(castedSkillReference);
+                OnSkillCastRegistered(context);
             }
         }
 
@@ -450,7 +540,9 @@ namespace Systems.SimpleSkills.Components
         /// </summary>
         private void ClearCastedSkillDataAt(int index)
         {
+            CastSkillContext context = GetCastedSkillContextFor(index);
             currentlyCastedSkills.RemoveAt(index);
+            OnSkillCastRemoved(context);
         }
 
         private void UpdateCastedSkillDataFor([NotNull] SkillBase skill, CastedSkillReference updatedReference)
@@ -472,7 +564,7 @@ namespace Systems.SimpleSkills.Components
         {
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
             if (!ReferenceEquals(skill, null)) return TryGetCastedSkillDataFor(skill, out castedSkillReference);
-            
+
             castedSkillReference = default;
             return false;
         }
@@ -501,8 +593,8 @@ namespace Systems.SimpleSkills.Components
         /// <returns>A new instance of <see cref="CastSkillContext"/>.</returns>
         private CastSkillContext GetCastedSkillContextFor(int index)
         {
-            return new CastSkillContext(this, currentlyCastedSkills[index].skill,
-                currentlyCastedSkills[index].flags);
+            CastedSkillReference entry = currentlyCastedSkills[index];
+            return new CastSkillContext(this, entry.skill, entry.flags, entry.target);
         }
 
 
@@ -520,18 +612,18 @@ namespace Systems.SimpleSkills.Components
 
         /// <summary>
         ///     Checks if the <paramref name="context"/> skill is currently on cooldown.
+        ///     For skills with charges, checks if all charges are on cooldown.
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill is on cooldown.</returns>
-        /// <remarks>
-        ///     If the skill has no cooldown, it is never on cooldown.
-        ///     If the skill is not casted, it is not on cooldown.
-        ///     If the skill is casted, it is on cooldown if its cooldown timer has not finished yet.
-        /// </remarks>
         protected virtual OperationResult IsSkillOnCooldown(in CastSkillContext context)
         {
             // If skill has no cooldown, it is not on cooldown
             if (!context.skill.HasCooldown) return SkillOperations.Permitted();
+
+            // For charge skills, cooldown check is handled separately via charge count
+            if (context.skill is ISkillWithCharges chargeSkill && chargeSkill.MaxCharges > 1)
+                return SkillOperations.Permitted();
 
             // If skill is not casted, it is not on cooldown
             if (!TryGetCastedSkillDataFor(context.skill, out CastedSkillReference data))
@@ -541,7 +633,7 @@ namespace Systems.SimpleSkills.Components
             return data.IsOnCooldown ? SkillOperations.CooldownNotFinished() : SkillOperations.Permitted();
         }
 
-        
+
         /// <summary>
         ///     Checks if the <paramref name="context"/> skill has enough resources to be casted.
         /// </summary>
@@ -550,7 +642,7 @@ namespace Systems.SimpleSkills.Components
         protected virtual OperationResult HasEnoughSkillResources(in CastSkillContext context) =>
             context.skill.HasEnoughResources(context);
 
-        
+
         /// <summary>
         ///     Checks if the <paramref name="context"/> skill can be casted successfully.
         /// </summary>
@@ -570,7 +662,7 @@ namespace Systems.SimpleSkills.Components
         /// </summary>
         /// <param name="context">The <see cref="CastSkillContext"/> to check.</param>
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill can be cast.</returns>
-        protected virtual OperationResult IsSkillAlreadyActive(in CastSkillContext context)
+        protected virtual OperationResult IsSkillAlreadyCast(in CastSkillContext context)
         {
             int activeCount = GetActiveStackCount(context.skill);
             if (activeCount == 0) return SkillOperations.Permitted();
@@ -583,7 +675,7 @@ namespace Systems.SimpleSkills.Components
                     : SkillOperations.SkillMaxStacks();
             }
 
-            return SkillOperations.SkillAlreadyActive();
+            return SkillOperations.SkillAlreadyBeingCast();
         }
 
         /// <summary>
@@ -605,7 +697,7 @@ namespace Systems.SimpleSkills.Components
         /// <summary>
         ///     Resets an active skill's state by interrupting it. Used when <see cref="SkillCastFlags.ResetOnRecast"/> is set.
         /// </summary>
-        private void ResetActiveSkill([NotNull] SkillBase skill)
+        private void ResetCastSkill([NotNull] SkillBase skill)
         {
             for (int i = 0; i < currentlyCastedSkills.Count; i++)
             {
@@ -613,7 +705,7 @@ namespace Systems.SimpleSkills.Components
                 if (!ReferenceEquals(entry.skill, skill)) continue;
                 if (entry.skillState is SkillState.Charging or SkillState.Channeling or SkillState.Complete)
                 {
-                    entry.skillState = SkillState.Cancelled;
+                    entry.stateMachine.TryTransitionTo(SkillState.Cancelled);
                     currentlyCastedSkills[i] = entry;
                     return;
                 }
@@ -627,12 +719,435 @@ namespace Systems.SimpleSkills.Components
         /// <returns>An <see cref="OperationResult"/> indicating whether the skill can be interrupted.</returns>
         protected virtual OperationResult CanSkillBeInterrupted(in InterruptSkillContext context) =>
             context.skill.CanBeInterrupted(context);
-      
+
+#endregion
+
+#region Skill Leveling
+
+        /// <summary>
+        ///     Returns the current level for a leveled skill on this caster.
+        ///     Override to implement per-caster skill progression.
+        /// </summary>
+        /// <param name="skill">The leveled skill to query</param>
+        /// <returns>The skill level (1-based). Default returns 1.</returns>
+        protected virtual int GetSkillLevel([NotNull] ISkillWithLevels skill) => skill.Level;
+
+#endregion
+
+#region Cooldown Groups
+
+        /// <summary>
+        ///     Active group cooldown timers
+        /// </summary>
+        protected readonly List<GroupCooldownEntry> groupCooldowns = new();
+
+        /// <summary>
+        ///     Read-only access to group cooldowns
+        /// </summary>
+        public IReadOnlyList<GroupCooldownEntry> GroupCooldowns => groupCooldowns;
+
+        /// <summary>
+        ///     Checks if any of the skill's groups (if any) are on cooldown.
+        /// </summary>
+        protected virtual OperationResult IsSkillGroupOnCooldown(in CastSkillContext context)
+        {
+            GetSkillGroupTypes(context.skill, sharedGroupTypeBuffer);
+            if (sharedGroupTypeBuffer.Count == 0) return SkillOperations.Permitted();
+
+            for (int g = 0; g < sharedGroupTypeBuffer.Count; g++)
+            {
+                Type groupType = sharedGroupTypeBuffer[g];
+                for (int i = 0; i < groupCooldowns.Count; i++)
+                {
+                    if (groupCooldowns[i].groupType == groupType && !groupCooldowns[i].IsComplete)
+                        return SkillOperations.GroupCooldownNotFinished();
+                }
+            }
+
+            return SkillOperations.Permitted();
+        }
+
+        /// <summary>
+        ///     Checks if a specific group type is on cooldown.
+        /// </summary>
+        public bool IsGroupOnCooldown<TGroup>() where TGroup : struct, ISkillGroup
+        {
+            Type groupType = typeof(TGroup);
+            for (int i = 0; i < groupCooldowns.Count; i++)
+            {
+                if (groupCooldowns[i].groupType == groupType && !groupCooldowns[i].IsComplete)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        ///     Sets the group cooldown(s) after a successful cast.
+        ///     A skill may belong to multiple groups.
+        /// </summary>
+        private void SetGroupCooldownForSkill([NotNull] SkillBase skill)
+        {
+            GetSkillGroupTypes(skill, sharedGroupTypeBuffer);
+
+            for (int g = 0; g < sharedGroupTypeBuffer.Count; g++)
+            {
+                Type groupType = sharedGroupTypeBuffer[g];
+                float cooldown = GetSkillGroupCooldown(groupType);
+                if (cooldown <= 0) continue;
+
+                // Replace existing entry or add new one
+                bool found = false;
+                for (int i = 0; i < groupCooldowns.Count; i++)
+                {
+                    if (groupCooldowns[i].groupType != groupType) continue;
+                    groupCooldowns[i] = new GroupCooldownEntry(groupType, cooldown);
+                    found = true;
+                    break;
+                }
+
+                if (!found)
+                    groupCooldowns.Add(new GroupCooldownEntry(groupType, cooldown));
+            }
+        }
+
+        /// <summary>
+        ///     Handles group cooldown timer updates.
+        /// </summary>
+        protected void HandleGroupCooldowns(float deltaTime)
+        {
+            for (int i = groupCooldowns.Count - 1; i >= 0; i--)
+            {
+                GroupCooldownEntry entry = groupCooldowns[i];
+                entry.cooldownTimer += deltaTime;
+                groupCooldowns[i] = entry;
+
+                if (entry.IsComplete)
+                    groupCooldowns.RemoveAt(i);
+            }
+        }
+
+        /// <summary>
+        ///     Reusable buffer for group type lookups to avoid allocation per call.
+        /// </summary>
+        private readonly List<Type> sharedGroupTypeBuffer = new();
+
+        /// <summary>
+        ///     Extracts all group types from a skill implementing IWithSkillGroup.
+        ///     Results are written to the provided buffer (cleared first).
+        /// </summary>
+        private static void GetSkillGroupTypes([NotNull] SkillBase skill, List<Type> buffer)
+        {
+            buffer.Clear();
+            Type skillType = skill.GetType();
+            foreach (Type interfaceType in skillType.GetInterfaces())
+            {
+                if (!interfaceType.IsGenericType) continue;
+                if (interfaceType.GetGenericTypeDefinition() != typeof(IWithSkillGroup<>)) continue;
+                buffer.Add(interfaceType.GetGenericArguments()[0]);
+            }
+        }
+
+        /// <summary>
+        ///     Gets the cooldown duration for a group type.
+        /// </summary>
+        private static float GetSkillGroupCooldown([NotNull] Type groupType)
+        {
+            ISkillGroup group = (ISkillGroup) Activator.CreateInstance(groupType);
+            return group.Cooldown;
+        }
+
+#endregion
+
+#region Skill Charges
+
+        /// <summary>
+        ///     Returns the number of available charges for a skill.
+        /// </summary>
+        /// <param name="skill">The skill to check</param>
+        /// <param name="maxCharges">Maximum charges for this skill</param>
+        /// <returns>Number of charges available to use</returns>
+        protected int GetAvailableCharges([NotNull] SkillBase skill, int maxCharges)
+        {
+            int coolingCharges = 0;
+            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            {
+                CastedSkillReference entry = currentlyCastedSkills[i];
+                if (!ReferenceEquals(entry.skill, skill)) continue;
+                coolingCharges++;
+            }
+            return maxCharges - coolingCharges;
+        }
+
+        /// <summary>
+        ///     Returns the number of available charges for a skill type.
+        /// </summary>
+        public int GetAvailableCharges<TSkill>() where TSkill : SkillBase, ISkillWithCharges, new()
+        {
+            TSkill skill = SkillsDatabase.GetExact<TSkill>();
+            if (ReferenceEquals(skill, null)) return 0;
+            return GetAvailableCharges(skill, skill.MaxCharges);
+        }
+
+        /// <summary>
+        ///     Returns the recharge progress (0 to 1) of the oldest cooling charge for a skill type.
+        ///     Returns 1 if no charges are currently recharging.
+        /// </summary>
+        public float GetOldestChargeRechargeProgress<TSkill>() where TSkill : SkillBase, ISkillWithCharges, new()
+        {
+            TSkill skill = SkillsDatabase.GetExact<TSkill>();
+            if (ReferenceEquals(skill, null)) return 1f;
+
+            float oldestProgress = 1f;
+            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            {
+                CastedSkillReference entry = currentlyCastedSkills[i];
+                if (!ReferenceEquals(entry.skill, skill)) continue;
+                if (!entry.IsOnCooldown) continue;
+
+                float progress = entry.CooldownProgress;
+                if (progress < oldestProgress)
+                    oldestProgress = progress;
+            }
+            return oldestProgress;
+        }
+
+#endregion
+
+#region Passive Skills
+
+        /// <summary>
+        ///     Set of currently active passive skills
+        /// </summary>
+        private readonly HashSet<SkillBase> activeSkills = new();
+
+        /// <summary>
+        ///     Activates a skill. Calls <see cref="IActivatedSkill.OnActivated"/>.
+        /// </summary>
+        /// <returns>Result of the operation</returns>
+        protected OperationResult ActivateSkill<TSkill>()
+            where TSkill : SkillBase, IActivatedSkill, new()
+        {
+            TSkill skill = SkillsDatabase.GetExact<TSkill>();
+            if (ReferenceEquals(skill, null)) return SkillOperations.SkillNotFound();
+            return ActivateSkill(skill);
+        }
+
+        /// <summary>
+        ///     Activates a skill. Calls <see cref="IActivatedSkill.OnActivated"/>.
+        /// </summary>
+        /// <returns>Result of the operation</returns>
+        protected OperationResult ActivateSkill([NotNull] SkillBase skill)
+        {
+            Debug.Assert(skill is IActivatedSkill, $"Skill {skill.name} does not implement IPassiveSkill");
+            Debug.Assert(skill is not ISkillWithCharges, $"Passive skill {skill.name} cannot have charges");
+
+            if (!activeSkills.Add(skill))
+                return SkillOperations.SkillAlreadyBeingCast();
+
+            ((IActivatedSkill) skill).OnActivated();
+            return SkillOperations.Permitted();
+        }
+
+        /// <summary>
+        ///     Deactivates a skill. Calls <see cref="IActivatedSkill.OnDeactivated"/>.
+        /// </summary>
+        /// <returns>Result of the operation</returns>
+        protected OperationResult DeactivateSkill<TSkill>()
+            where TSkill : SkillBase, IActivatedSkill, new()
+        {
+            TSkill skill = SkillsDatabase.GetExact<TSkill>();
+            if (ReferenceEquals(skill, null)) return SkillOperations.SkillNotFound();
+            return DeactivateSkill(skill);
+        }
+
+        /// <summary>
+        ///     Deactivates a skill. Calls <see cref="IActivatedSkill.OnDeactivated"/>.
+        /// </summary>
+        /// <returns>Result of the operation</returns>
+        protected OperationResult DeactivateSkill([NotNull] SkillBase skill)
+        {
+            Debug.Assert(skill is IActivatedSkill, $"Skill {skill.name} does not implement IPassiveSkill");
+
+            if (!activeSkills.Remove(skill))
+                return SkillOperations.PassiveNotActive();
+
+            ((IActivatedSkill) skill).OnDeactivated();
+            return SkillOperations.Permitted();
+        }
+
+        /// <summary>
+        ///     Checks if a skill is currently active.
+        /// </summary>
+        public bool IsSkillActivated<TSkill>() where TSkill : SkillBase, IActivatedSkill, new()
+        {
+            TSkill skill = SkillsDatabase.GetExact<TSkill>();
+            return !ReferenceEquals(skill, null) && activeSkills.Contains(skill);
+        }
+
+        /// <summary>
+        ///     Checks if a skill is currently active.
+        /// </summary>
+        protected bool IsSkillActivated([NotNull] SkillBase skill) => activeSkills.Contains(skill);
+
+        /// <summary>
+        ///     Handles skill tick updates.
+        /// </summary>
+        protected void HandlePassiveTicks(float deltaTime)
+        {
+            foreach (SkillBase activeSkill in activeSkills)
+            {
+                ((IActivatedSkill) activeSkill).OnTickWhileActive(deltaTime);
+            }
+        }
+
+#endregion
+
+#region Utility
+
+        /// <summary>
+        ///     Returns the effective cooldown duration for a skill, considering both the skill's own
+        ///     cooldown and any group cooldowns it belongs to. Returns the maximum of all applicable cooldowns.
+        ///     This is the value that should be displayed on UI cooldown indicators.
+        /// </summary>
+        /// <param name="skill">The skill to query</param>
+        /// <returns>The effective cooldown duration in seconds, or 0 if the skill has no cooldown</returns>
+        public float GetSkillEffectiveCooldown([NotNull] SkillBase skill)
+        {
+            float effectiveCooldown = skill.CooldownTime;
+
+            GetSkillGroupTypes(skill, sharedGroupTypeBuffer);
+            for (int g = 0; g < sharedGroupTypeBuffer.Count; g++)
+            {
+                float groupCooldown = GetSkillGroupCooldown(sharedGroupTypeBuffer[g]);
+                if (groupCooldown > effectiveCooldown)
+                    effectiveCooldown = groupCooldown;
+            }
+
+            return effectiveCooldown;
+        }
+
+        /// <summary>
+        ///     Returns the effective cooldown progress (0 to 1) for a skill, considering both
+        ///     individual skill cooldown and group cooldowns. Returns the least progressed (most time remaining)
+        ///     cooldown as that is what blocks the skill from being cast.
+        ///     This is the value that should be used for UI cooldown fill indicators.
+        /// </summary>
+        /// <param name="skill">The skill to query</param>
+        /// <returns>
+        ///     Normalized progress from 0 (just started) to 1 (complete/ready).
+        ///     Returns 1 if the skill is not on any cooldown.
+        /// </returns>
+        public float GetSkillEffectiveCooldownPercentage([NotNull] SkillBase skill)
+        {
+            float lowestProgress = 1f;
+
+            // Check individual skill cooldown
+            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            {
+                CastedSkillReference entry = currentlyCastedSkills[i];
+                if (!ReferenceEquals(entry.skill, skill)) continue;
+                if (!entry.IsOnCooldown) continue;
+
+                float progress = entry.CooldownProgress;
+                if (progress < lowestProgress)
+                    lowestProgress = progress;
+            }
+
+            // Check group cooldowns
+            GetSkillGroupTypes(skill, sharedGroupTypeBuffer);
+            for (int g = 0; g < sharedGroupTypeBuffer.Count; g++)
+            {
+                Type groupType = sharedGroupTypeBuffer[g];
+                for (int i = 0; i < groupCooldowns.Count; i++)
+                {
+                    if (groupCooldowns[i].groupType != groupType) continue;
+                    if (groupCooldowns[i].IsComplete) continue;
+
+                    float progress = groupCooldowns[i].Progress;
+                    if (progress < lowestProgress)
+                        lowestProgress = progress;
+                }
+            }
+
+            return lowestProgress;
+        }
+
+        /// <summary>
+        ///     Returns the remaining cooldown time for a skill, considering both individual
+        ///     skill cooldown and group cooldowns. Returns the longest remaining time.
+        /// </summary>
+        /// <param name="skill">The skill to query</param>
+        /// <returns>Remaining cooldown time in seconds, or 0 if not on cooldown</returns>
+        public float GetSkillCooldownTimeLeft([NotNull] SkillBase skill)
+        {
+            float longestTimeLeft = 0f;
+
+            // Check individual skill cooldown
+            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            {
+                CastedSkillReference entry = currentlyCastedSkills[i];
+                if (!ReferenceEquals(entry.skill, skill)) continue;
+                if (!entry.IsOnCooldown) continue;
+
+                float timeLeft = entry.CooldownTimeLeft;
+                if (timeLeft > longestTimeLeft)
+                    longestTimeLeft = timeLeft;
+            }
+
+            // Check group cooldowns
+            GetSkillGroupTypes(skill, sharedGroupTypeBuffer);
+            for (int g = 0; g < sharedGroupTypeBuffer.Count; g++)
+            {
+                Type groupType = sharedGroupTypeBuffer[g];
+                for (int i = 0; i < groupCooldowns.Count; i++)
+                {
+                    if (groupCooldowns[i].groupType != groupType) continue;
+                    if (groupCooldowns[i].IsComplete) continue;
+
+                    float timeLeft = groupCooldowns[i].cooldownDuration - groupCooldowns[i].cooldownTimer;
+                    if (timeLeft > longestTimeLeft)
+                        longestTimeLeft = timeLeft;
+                }
+            }
+
+            return longestTimeLeft;
+        }
+
+        /// <summary>
+        ///     Checks whether a skill is currently blocked by any cooldown (individual or group).
+        /// </summary>
+        /// <param name="skill">The skill to query</param>
+        /// <returns>True if the skill is blocked by any cooldown</returns>
+        public bool IsSkillOnAnyCooldown([NotNull] SkillBase skill)
+        {
+            // Check individual skill cooldown
+            for (int i = 0; i < currentlyCastedSkills.Count; i++)
+            {
+                CastedSkillReference entry = currentlyCastedSkills[i];
+                if (ReferenceEquals(entry.skill, skill) && entry.IsOnCooldown)
+                    return true;
+            }
+
+            // Check group cooldowns
+            GetSkillGroupTypes(skill, sharedGroupTypeBuffer);
+            for (int g = 0; g < sharedGroupTypeBuffer.Count; g++)
+            {
+                Type groupType = sharedGroupTypeBuffer[g];
+                for (int i = 0; i < groupCooldowns.Count; i++)
+                {
+                    if (groupCooldowns[i].groupType == groupType && !groupCooldowns[i].IsComplete)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
 #endregion
 
 #region Events
 
-        
+
         /// <summary>
         ///     Consumes the resources required to cast the skill.
         /// </summary>
@@ -680,7 +1195,7 @@ namespace Systems.SimpleSkills.Components
         ///     This method is called every tick while the skill is channeling.
         /// </remarks>
         protected virtual void OnSkillTickWhenChanneling(in CastSkillContext context) =>
-            ((ChannelingSkillBase) context.skill).OnCastTickWhenChanneling(context);
+            ((IChannelingSkillBase) context.skill).OnCastTickWhenChanneling(context);
 
         /// <summary>
         ///     Event raised when the skill cast has ended.
@@ -689,10 +1204,15 @@ namespace Systems.SimpleSkills.Components
         /// <remarks>
         ///     This method is called when the skill cast has finished successfully.
         /// </remarks>
-        protected virtual void OnSkillCastEnd(in CastSkillContext context) =>
+        protected virtual void OnSkillCastEnd(in CastSkillContext context)
+        {
             context.skill.OnCastEnded(context);
+            
+            if (context.skill is IActivatedSkill passiveSkill)
+                ActivateSkill((SkillBase) passiveSkill); // Guaranteed to be true
+        }
 
-        
+
         /// <summary>
         ///     Event raised when the skill cast was interrupted.
         /// </summary>
@@ -703,8 +1223,8 @@ namespace Systems.SimpleSkills.Components
         /// </remarks>
         protected virtual void OnSkillCastInterrupted(in InterruptSkillContext context, in OperationResult reason) =>
             context.skill.OnCastInterrupted(context, reason);
-        
-        
+
+
         /// <summary>
         ///     Event raised when the skill cast was interrupted but the interrupt attempt failed.
         /// </summary>
@@ -715,6 +1235,31 @@ namespace Systems.SimpleSkills.Components
         /// </remarks>
         protected virtual void OnSkillCastInterruptFailed(in InterruptSkillContext context, in OperationResult reason)
             => context.skill.OnCastInterruptFailed(context, reason);
+
+        /// <summary>
+        ///     Event raised each tick while a skill is on cooldown.
+        ///     Override to implement UI cooldown indicators or other per-tick cooldown logic.
+        /// </summary>
+        /// <param name="context">The <see cref="CastSkillContext"/> of the skill on cooldown.</param>
+        protected virtual void OnSkillCooldownTick(in CastSkillContext context) =>
+            context.skill.OnCooldownTick(context);
+
+        /// <summary>
+        ///     Event raised when a skill cast is registered (added to the active cast list).
+        ///     Override to react to new casts for AI, UI, or logging.
+        /// </summary>
+        /// <param name="context">The <see cref="CastSkillContext"/> of the registered skill.</param>
+        protected virtual void OnSkillCastRegistered(in CastSkillContext context) =>
+            context.skill.OnCastRegistered(context);
+
+        /// <summary>
+        ///     Event raised when a skill cast is removed from the active cast list
+        ///     (cooldown finished or cleared without cooldown).
+        ///     Override to react to cast removal for AI, UI, or logging.
+        /// </summary>
+        /// <param name="context">The <see cref="CastSkillContext"/> of the removed skill.</param>
+        protected virtual void OnSkillCastRemoved(in CastSkillContext context) =>
+            context.skill.OnCastRemoved(context);
 
 #endregion
     }
