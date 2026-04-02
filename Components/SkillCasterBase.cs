@@ -39,7 +39,7 @@ namespace Systems.SimpleSkills.Components
             HandleSkillsCompleted(deltaTime);
             HandleCooldowns(deltaTime);
             HandleGroupCooldowns(deltaTime);
-            HandlePassiveTicks(deltaTime);
+            HandleActivatedSkillTicks(deltaTime);
         }
 
         /// <summary>
@@ -357,12 +357,11 @@ namespace Systems.SimpleSkills.Components
                 SkillBase skill = withLevels.GetSkillForLevel(index);
 
                 // We check at least 3 indices, because design loves to sabotage projects.
-                while (!ReferenceEquals(skill, null) || index < 3) 
+                while (!ReferenceEquals(skill, null) || index < 3)
                 {
-                    // We need that check due to minimum index included in loop
-                    if (ReferenceEquals(skill, null)) continue; 
-                    if (IsSkillActivated(skill)) DeactivateSkill(skill);
-                    
+                    if (!ReferenceEquals(skill, null) && IsSkillActivated(skill))
+                        DeactivateSkill(skill);
+
                     index++;
                     skill = withLevels.GetSkillForLevel(index);
                 }
@@ -484,7 +483,8 @@ namespace Systems.SimpleSkills.Components
             }
 
             // Update casted skill data
-            skillData.stateMachine.TryTransitionTo(SkillState.Interrupted);
+            SkillState targetState = context.IsCancellation ? SkillState.Cancelled : SkillState.Interrupted;
+            skillData.stateMachine.TryTransitionTo(targetState);
             UpdateCastedSkillDataFor(context.skill, skillData);
 
             // Execute events
@@ -897,28 +897,30 @@ namespace Systems.SimpleSkills.Components
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
             if (ReferenceEquals(skill, null)) return 1f;
 
-            float oldestProgress = 1f;
+            float oldestProgress = 0f;
+            bool found = false;
             for (int i = 0; i < currentlyCastedSkills.Count; i++)
             {
                 CastedSkillReference entry = currentlyCastedSkills[i];
                 if (!ReferenceEquals(entry.skill, skill)) continue;
                 if (!entry.IsOnCooldown) continue;
 
+                found = true;
                 float progress = entry.CooldownProgress;
-                if (progress < oldestProgress)
+                if (progress > oldestProgress)
                     oldestProgress = progress;
             }
-            return oldestProgress;
+            return found ? oldestProgress : 1f;
         }
 
 #endregion
 
-#region Passive Skills
+#region Activated Skills
 
         /// <summary>
-        ///     Set of currently active passive skills
+        ///     Set of currently active skills
         /// </summary>
-        private readonly HashSet<SkillBase> activeSkills = new();
+        private readonly List<SkillBase> activeSkills = new();
 
         /// <summary>
         ///     Activates a skill. Calls <see cref="IActivatedSkill.OnActivated"/>.
@@ -938,13 +940,23 @@ namespace Systems.SimpleSkills.Components
         /// <returns>Result of the operation</returns>
         protected OperationResult ActivateSkill([NotNull] SkillBase skill)
         {
-            Debug.Assert(skill is IActivatedSkill, $"Skill {skill.name} does not implement IPassiveSkill");
-            Debug.Assert(skill is not ISkillWithCharges, $"Passive skill {skill.name} cannot have charges");
+            if (skill is not IActivatedSkill activatedSkill)
+            {
+                Debug.LogError($"Skill {skill.name} does not implement necessary interface: {nameof(IActivatedSkill)}");
+                return SkillOperations.Forbidden();
+            }
+            
+            if (activatedSkill is ISkillWithCharges)
+            {
+                Debug.LogError($"Activated skill {skill.name} cannot have charges");
+                return SkillOperations.Forbidden();
+            }
 
-            if (!activeSkills.Add(skill))
+            if (activeSkills.Contains(skill))
                 return SkillOperations.SkillAlreadyBeingCast();
 
-            ((IActivatedSkill) skill).OnActivated();
+            activeSkills.Add(skill);
+            activatedSkill.OnActivated();
             return SkillOperations.Permitted();
         }
 
@@ -992,11 +1004,11 @@ namespace Systems.SimpleSkills.Components
         /// <summary>
         ///     Handles skill tick updates.
         /// </summary>
-        protected void HandlePassiveTicks(float deltaTime)
+        protected void HandleActivatedSkillTicks(float deltaTime)
         {
-            foreach (SkillBase activeSkill in activeSkills)
+            for (int i = activeSkills.Count - 1; i >= 0; i--)
             {
-                ((IActivatedSkill) activeSkill).OnTickWhileActive(deltaTime);
+                ((IActivatedSkill) activeSkills[i]).OnTickWhileActive(deltaTime);
             }
         }
 

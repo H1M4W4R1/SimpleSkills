@@ -117,14 +117,28 @@ namespace Systems.SimpleSkills.Data.Internal
         }
 
         /// <summary>
+        ///     Effective cooldown duration, accounting for interrupted cooldown multiplier
+        /// </summary>
+        private float EffectiveCooldownTime
+        {
+            get
+            {
+                float cd = skill.CooldownTime;
+                if (wasInterrupted) cd *= skill.InterruptedCooldownMultiplier;
+                return cd;
+            }
+        }
+
+        /// <summary>
         ///     Normalized cooldown progress (0 to 1). Returns 1 if skill doesn't have cooldown time
         /// </summary>
         public float CooldownProgress
         {
             get
             {
-                if (skill.CooldownTime <= 0) return 1f;
-                return math.clamp(cooldownTimer / skill.CooldownTime, 0, 1);
+                float effective = EffectiveCooldownTime;
+                if (effective <= 0) return 1f;
+                return math.clamp(cooldownTimer / effective, 0, 1);
             }
         }
 
@@ -156,11 +170,11 @@ namespace Systems.SimpleSkills.Data.Internal
         /// <summary>
         ///     Skill cooldown time, returns -1 if skill doesn't have cooldown time
         /// </summary>
-        public float CooldownTime => skill.CooldownTime > 0 ? skill.CooldownTime : -1;
+        public float CooldownTime => EffectiveCooldownTime > 0 ? EffectiveCooldownTime : -1;
 
         /// <summary>
         ///     Skill cooldown time left, returns -1 if skill doesn't have cooldown time
         /// </summary>
-        public float CooldownTimeLeft => skill.CooldownTime > 0 ? skill.CooldownTime - cooldownTimer : -1;
+        public float CooldownTimeLeft => EffectiveCooldownTime > 0 ? EffectiveCooldownTime - cooldownTimer : -1;
     }
 }

@@ -18,7 +18,7 @@ namespace Systems.SimpleSkills.Operations
         public const ushort ERROR_PASSIVE_ALREADY_ACTIVE = 0x000A;
         public const ushort ERROR_PASSIVE_NOT_ACTIVE = 0x000B;
         public const ushort SUCCESS_SKILL_DEACTIVATED = 0x000C;
-        
+        public const ushort ERROR_FORBIDDEN = 0x000D;
         
 
         public static OperationResult Permitted()
@@ -42,5 +42,7 @@ namespace Systems.SimpleSkills.Operations
 
         
         public static OperationResult Casted() => OperationResult.Success(SYSTEM_SKILL, SUCCESS_CAST_STARTED);
+
+        public static OperationResult Forbidden() => OperationResult.Error(SYSTEM_SKILL, ERROR_FORBIDDEN);
     }
 }
