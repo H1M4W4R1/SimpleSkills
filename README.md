@@ -23,20 +23,21 @@ See `SimpleSkills.asmdef` for assembly definition details.
 
 - **SkillBase**: Abstract base class for all skills. Override to define availability checks, resource consumption, and lifecycle callbacks
 - **SkillCasterBase**: MonoBehaviour that manages skill casting, cooldowns, charging, and channeling. Inherit and override to create unit/player controllers
-- **CastSkillContext**: Read-only context struct passed to skill callbacks containing caster, skill, flags, and optional target reference
+- **CastSkillContext**: Read-only context passed to skill callbacks containing caster, skill, flags, and optional target reference
+- **InterruptSkillContext**: Read-only context passed to interrupt/cancel callbacks containing caster, source, skill, and flags
 - **SkillsDatabase**: Addressable-based database for skill lookup and management
 
 ### Skill Interfaces
 
-- **IChannelingSkillBase**: For skills that sustain effects over time (beam attacks, channels). Override `OnCastTickWhenChanneling` and set `Duration`
-- **IActivatedSkill**: For passive/aura skills toggled on/off without cooldown. Implement `OnActivated()`, `OnDeactivated()`, and `OnTickWhileActive()`
-- **ISkillWithCharges**: For abilities with multiple uses before entering shared cooldown (e.g., double-dash). Set `MaxCharges`
-- **ISkillWithLevels**: For scalable skills with level-dependent versions. Implement `Level` property and `GetSkillForLevel()`
+- **IChannelingSkillBase**: For skills that sustain effects over time (beam attacks, channels). Override `OnCastTickWhenChanneling` and set `Duration`. When `Duration <= 0`, the skill channels infinitely (`IsInfinite` returns `true`)
+- **IActivatedSkill**: For persistent-effect skills toggled on/off via `ActivateSkill`/`DeactivateSkill`. Implement `OnActivated()`, `OnDeactivated()`, and `OnTickWhileActive()`. Cannot be combined with `ISkillWithCharges`
+- **ISkillWithCharges**: For abilities with multiple uses before each recharges independently (e.g., double-dash). Set `MaxCharges`
+- **ISkillWithLevels**: For scalable skills with level-dependent variants. Inherit `SkillWithLevels<TSelf>` which implements `GetSkillForLevel()` automatically; override `Level` on each variant asset
 
 ### Flags and Control
 
-- **SkillCastFlags**: Enum for conditional behavior (ignore cooldown, refund on failure, allow stacking, etc.)
-- **InterruptSkillContext**: Context for interrupt/cancellation operations with flags to distinguish intent
+- **SkillCastFlags**: Enum for conditional behavior — `IgnoreAvailability`, `IgnoreCosts`, `IgnoreCooldown`, `IgnoreRequirements`, `DoNotConsumeResources`, `RefundResourcesOnFailure`, `AllowStacking`, `NoCooldownOnInterrupt`, `ResetOnRecast`
+- **SkillInterruptFlags**: Enum for interrupt behavior — `IgnoreRequirements` bypasses `CanBeInterrupted` check
 
 ## Usage Examples
 
@@ -50,7 +51,6 @@ public class FireballSkill : SkillBase
 
     protected internal override OperationResult HasEnoughResources(in CastSkillContext context)
     {
-        // Check if caster has enough mana
         return context.caster.GetComponent<ManaPool>().mana >= 50
             ? SkillOperations.Permitted()
             : SkillOperations.Denied();
@@ -64,7 +64,10 @@ public class FireballSkill : SkillBase
     protected internal override void OnCastEnded(in CastSkillContext context)
     {
         // Spawn projectile, play effects, deal damage, etc.
-        SpawnFireball(context.target?.Position ?? context.caster.transform.position);
+        if (context.target is EnemyTarget enemy)
+            SpawnFireball(enemy.transform.position);
+        else
+            SpawnFireball(context.caster.transform.position + context.caster.transform.forward * 2f);
     }
 }
 ```
@@ -79,21 +82,20 @@ public class HealingChannelSkill : SkillBase, IChannelingSkillBase
 
     protected internal override OperationResult CanBeInterrupted(in InterruptSkillContext context)
     {
-        // Allow player to cancel but not AI interrupt
+        // Allow player cancellation but deny external interruption
         return context.IsCancellation ? SkillOperations.Permitted() : SkillOperations.Denied();
     }
 
     void IChannelingSkillBase.OnCastTickWhenChanneling(in CastSkillContext context)
     {
         // Heal target each tick
-        if (context.target is Health health)
-            health.Heal(10);
+        if (context.target is IHealable healable)
+            healable.Heal(10);
     }
 
     protected internal override void OnCastEnded(in CastSkillContext context)
     {
         // Play completion effect
-        PlayEffectAt(context.target?.Position ?? Vector3.zero);
     }
 }
 ```
@@ -108,8 +110,8 @@ public class DashSkill : SkillBase, ISkillWithCharges
 
     protected internal override void OnCastEnded(in CastSkillContext context)
     {
-        var direction = (context.target?.Position ?? context.caster.transform.forward) - context.caster.transform.position;
-        context.caster.GetComponent<Rigidbody>().velocity = direction.normalized * 20f;
+        context.caster.GetComponent<Rigidbody>().velocity =
+            context.caster.transform.forward * 20f;
     }
 }
 ```
@@ -131,7 +133,6 @@ public class DamageAuraSkill : SkillBase, IActivatedSkill
         tickTimer += deltaTime;
         if (tickTimer >= 0.5f)
         {
-            // Deal AOE damage every 0.5 seconds
             DealAoeDamage(10f);
             tickTimer = 0f;
         }
@@ -151,12 +152,10 @@ public class PlayerSkillCaster : SkillCasterBase
 {
     public void OnFireballPressed() => TryCastSkill<FireballSkill>();
     public void OnHealPressed() => TryCastSkill<HealingChannelSkill>();
-    
+
     public void OnCancelPressed()
     {
-        // Cancel any channeled healing skill
-        foreach (var type in new[] { typeof(HealingChannelSkill) })
-            TryCancelSkill(type);
+        TryCancelSkill<HealingChannelSkill>();
     }
 
     public void OnActivateAuraPressed() => ActivateSkill<DamageAuraSkill>();
@@ -167,17 +166,8 @@ public class PlayerSkillCaster : SkillCasterBase
 ### Casting with Targets
 
 ```csharp
-public void CastOnTarget(SkillBase skill, Transform target)
-{
-    var context = new CastSkillContext(
-        caster: this,
-        skill: skill,
-        flags: SkillCastFlags.None,
-        target: target.GetComponent<ISkillTarget>()
-    );
-    
-    TryCastSkillWithContext(context);
-}
+// Target must inherit from ISkillTarget
+TryCastSkill<FireballSkill>(target);
 ```
 
 ### Skill Availability Checks
@@ -213,20 +203,24 @@ Allow multiple concurrent casts of the same skill:
 public class MultiStrikeSkill : SkillBase
 {
     public override int MaxStacks => 3;
-
-    // Cast the skill up to 3 times simultaneously
 }
+
+// Cast with stacking enabled
+TryCastSkill<MultiStrikeSkill>(SkillCastFlags.AllowStacking);
 ```
 
 ### Group Cooldowns
 
-Assign skills to cooldown groups (via `IWithSkillGroup`) so casting one skill cools down others:
+Assign skills to a cooldown group so casting one skill starts a shared cooldown for all skills in that group. Define the group as a struct implementing `ISkillGroup`, then implement the generic marker interface `IWithSkillGroup<TGroup>` on each skill:
 
 ```csharp
-public interface IWithSkillGroup
+public struct PotionGroup : ISkillGroup
 {
-    public ISkillGroup SkillGroup { get; }
+    public float Cooldown => 1.5f;
 }
+
+public class HealthPotionSkill : SkillBase, IWithSkillGroup<PotionGroup> { }
+public class ManaPotionSkill : SkillBase, IWithSkillGroup<PotionGroup> { }
 ```
 
 ### Interrupted Cooldown Multiplier
@@ -248,54 +242,78 @@ Refund resources if a chance-based skill fails:
 TryCastSkill<ChanceSkill>(SkillCastFlags.RefundResourcesOnFailure);
 ```
 
+### Leveled Skills
+
+Create a skill with multiple level variants, each as a separate ScriptableObject asset:
+
+```csharp
+public abstract class FireballSkillBase : SkillWithLevels<FireballSkillBase>
+{
+    // shared overrides (callbacks, cooldown, etc.)
+}
+
+// Each asset in the database represents one level
+public class FireballSkillLevel1 : FireballSkillBase
+{
+    public override int Level => 1;
+    public override float CooldownTime => 5f;
+}
+
+public class FireballSkillLevel2 : FireballSkillBase
+{
+    public override int Level => 2;
+    public override float CooldownTime => 3f;
+}
+```
+
+Override `GetSkillLevel` on your caster to return the correct level per skill:
+
+```csharp
+protected override int GetSkillLevel(ISkillWithLevels skill)
+{
+    return playerData.GetSkillLevel(skill);
+}
+```
+
 ## Skill Lifecycle
 
-1. **Pre-cast checks**: Availability → Resources → Requirements (target, etc.)
-2. **Charging phase**: Accumulate charge time, call `OnCastTickWhenCharging`
+1. **Pre-cast checks**: Availability → Cooldown → Group cooldown → Charges → Resources → Requirements
+2. **Charging phase**: Accumulate charge time, call `OnCastTickWhenCharging` each tick
 3. **Casting phase**: Call `OnCastStarted`, then enter channeling or completion
-4. **Channeling phase** (if `IChannelingSkillBase`): Call `OnCastTickWhenChanneling` until duration expires
+4. **Channeling phase** (if `IChannelingSkillBase`): Call `OnCastTickWhenChanneling` each tick until duration expires; skipped if `IsInfinite`
 5. **Completion**: Call `OnCastEnded`
 6. **Cooldown phase**: Apply cooldown, call `OnCooldownTick` each tick
-7. **Interrupt/Cancel**: Call `OnCastInterrupted`, apply interrupted cooldown multiplier
-
-## Inheritance Pattern
-
-When creating custom skills, follow this hierarchy:
-
-```
-SkillBase (core)
-├── OneTimeSkill (instant cast, no channeling)
-├── ChargedSkill (has charging phase)
-├── ChanneledSkill (inherits + implements IChannelingSkillBase)
-├── PassiveSkill (inherits + implements IActivatedSkill)
-└── LeveledSkill (inherits SkillWithLevels)
-```
+7. **Interrupt/Cancel**: Call `OnCastInterrupted` on success or `OnCastInterruptFailed` on failure, apply `InterruptedCooldownMultiplier`
 
 ## Event Callbacks
 
-All event callbacks are `protected internal virtual` and use `ref` parameters:
+All event callbacks on `SkillBase` are `protected internal virtual` and use `in` parameters (pass-by-readonly-reference):
 
-- **OnCastStarted**: Skill charge/cast completed, about to execute
+- **OnCastStarted**: Skill charge completed, about to execute
 - **OnCastTickWhenCharging**: Called each tick during charge phase
-- **OnCastTickWhenChanneling**: Called each tick during channel phase (implement via interface)
 - **OnCastEnded**: Skill cast completed successfully
-- **OnCastFailed**: Pre-cast check failed
-- **OnCastInterrupted**: Skill interrupted while charging/channeling
+- **OnCastFailed**: Pre-cast check failed (receives failure reason)
+- **OnCastInterrupted**: Skill interrupted or cancelled while charging/channeling
+- **OnCastInterruptFailed**: Interrupt attempt rejected (receives rejection reason)
 - **OnCooldownTick**: Called each tick while on cooldown
-- **OnCastRegistered**: Skill added to active cast list
-- **OnCastRemoved**: Skill removed from active cast list
+- **OnCastRegistered**: Skill added to the active cast list
+- **OnCastRemoved**: Skill removed from the active cast list
+- **ConsumeResources**: Called to spend resources before cast attempt
+- **RefundResources**: Called to return resources when `RefundResourcesOnFailure` is set and `CheckAttemptSuccess` fails
+
+`OnCastTickWhenChanneling` is declared on `IChannelingSkillBase` (not `SkillBase`) and must be implemented explicitly via the interface.
 
 ## Database Integration
 
-All skills are stored in a SkillsDatabase indexed by addressable labels. Use the `[AutoCreate("Skills", SkillsDatabase.LABEL)]` attribute on skill ScriptableObjects to auto-register them for addressable loading.
+All skills are stored in a `SkillsDatabase` indexed by addressable labels. The `[AutoCreate("Skills", SkillsDatabase.LABEL)]` attribute on `SkillBase` auto-registers all derived ScriptableObjects for addressable loading.
 
 ## Performance Considerations
 
-- `CastSkillContext` is a ref struct (stack-allocated, zero GC)
+- `CastSkillContext` and `InterruptSkillContext` are `readonly ref struct` (stack-only, zero GC). They cannot be captured in lambdas, stored in collections, used with `async/await`, or passed to `System.Action` delegates. Copy required fields to a regular struct if deferred processing is needed
 - Skills are ScriptableObjects (no runtime instantiation)
-- Supports unlimited concurrent skill instances (charged, channeled, cooldown)
+- Supports unlimited concurrent skill instances (charging, channeling, cooldown)
 - Reverse-iteration loops for safe addition/removal during callbacks
-- Built-in support for custom tick systems (override `Update()` or call `OnTickExecuted()` manually)
+- Built-in support for custom tick systems: override `Update()` to empty and call `OnTickExecuted(deltaTime)` manually (e.g., for turn-based systems)
 
 ## License
 

@@ -16,7 +16,7 @@ namespace Systems.SimpleSkills.Components
     /// <summary>
     ///     Represents a caster of a skill - either entity or even world
     /// </summary>
-    public abstract class SkillCasterBase : MonoBehaviour
+    public abstract class SkillCasterBase : MonoBehaviour, ISkillTarget
     {
 #region Ticks
 
@@ -186,33 +186,37 @@ namespace Systems.SimpleSkills.Components
         /// <summary>
         ///     Tries to cast skill
         /// </summary>
+        /// <param name="target">Target of skill</param>
         /// <param name="flags">Flags that describe how skill should be casted</param>
         /// <param name="actionSource">Source of action</param>
         /// <typeparam name="TSkill">Type of skill to cast</typeparam>
         /// <returns>Result of operation</returns>
         public OperationResult TryCastSkill<TSkill>(
+            [CanBeNull] ISkillTarget target = null,
             SkillCastFlags flags = SkillCastFlags.None,
             ActionSource actionSource = ActionSource.External)
             where TSkill : SkillBase, new()
         {
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
             if (ReferenceEquals(skill, null)) return SkillOperations.SkillNotFound();
-            return TryCastSkill(skill, flags, actionSource);
+            return TryCastSkill(skill, target is null ? this : target, flags, actionSource);
         }
 
         /// <summary>
         ///     Tries to cast skill
         /// </summary>
         /// <param name="skill">Skill to cast</param>
+        /// <param name="target">Target of skill</param>
         /// <param name="flags">Flags that describe how skill should be casted</param>
         /// <param name="actionSource">Source of action</param>
         /// <returns>Result of operation</returns>
         public OperationResult TryCastSkill(
             [NotNull] SkillBase skill,
+            ISkillTarget target,
             SkillCastFlags flags = SkillCastFlags.None,
             ActionSource actionSource = ActionSource.External)
         {
-            CastSkillContext context = new(this, skill, flags);
+            CastSkillContext context = new(this, skill, flags, target);
             return TryCastSkill(context, actionSource);
         }
 
