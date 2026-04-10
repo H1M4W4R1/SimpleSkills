@@ -48,8 +48,9 @@ namespace Systems.SimpleSkills.Data.Abstract
             {
                 if (sameSkills.List[i].Level == level)
                 {
+                    TSelfBaseSkill result = sameSkills.List[i];
                     sameSkills.Release();
-                    return sameSkills.List[i];
+                    return result;
                 }
                 
                 // Compute absolute distance to match best skill

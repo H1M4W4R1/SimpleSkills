@@ -355,13 +355,18 @@ namespace Systems.SimpleSkills.Components
             {
                 int index = 0;
                 SkillBase skill = withLevels.GetSkillForLevel(index);
+                SkillBase previousSkill = null;
 
                 // We check at least 3 indices, because design loves to sabotage projects.
                 while (!ReferenceEquals(skill, null) || index < 3)
                 {
+                    // Same result as last iteration means no more distinct levels exist (fallback kicked in)
+                    if (ReferenceEquals(skill, previousSkill)) break;
+
                     if (!ReferenceEquals(skill, null) && IsSkillActivated(skill))
                         DeactivateSkill(skill);
 
+                    previousSkill = skill;
                     index++;
                     skill = withLevels.GetSkillForLevel(index);
                 }
