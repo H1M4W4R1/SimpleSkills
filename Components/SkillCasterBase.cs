@@ -509,7 +509,7 @@ namespace Systems.SimpleSkills.Components
         /// <summary>
         ///     List of all currently casted skills
         /// </summary>
-        protected readonly List<CastedSkillReference> currentlyCastedSkills = new();
+        protected readonly List<CastedSkillReference> currentlyCastedSkills = new(8);
 
         /// <summary>
         ///     Access to currently casted skills
