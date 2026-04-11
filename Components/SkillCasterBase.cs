@@ -247,7 +247,7 @@ namespace Systems.SimpleSkills.Components
             // Deactivate passive if this passive is active
             if (IsSkillActivated(resolvedSkill))
             {
-                DeactivateSkill(resolvedSkill);
+                DeactivateSkill(resolvedSkill, context.target);
                 return SkillOperations.SkillDeactivated();
             }
 
@@ -368,7 +368,7 @@ namespace Systems.SimpleSkills.Components
                     if (ReferenceEquals(skill, previousSkill)) break;
 
                     if (!ReferenceEquals(skill, null) && IsSkillActivated(skill))
-                        DeactivateSkill(skill);
+                        DeactivateSkill(skill, context.target);
 
                     previousSkill = skill;
                     index++;
@@ -935,19 +935,19 @@ namespace Systems.SimpleSkills.Components
         ///     Activates a skill. Calls <see cref="IActivatedSkill.OnActivated"/>.
         /// </summary>
         /// <returns>Result of the operation</returns>
-        protected OperationResult ActivateSkill<TSkill>()
+        protected OperationResult ActivateSkill<TSkill>(ISkillTarget target)
             where TSkill : SkillBase, IActivatedSkill, new()
         {
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
             if (ReferenceEquals(skill, null)) return SkillOperations.SkillNotFound();
-            return ActivateSkill(skill);
+            return ActivateSkill(skill, target);
         }
 
         /// <summary>
         ///     Activates a skill. Calls <see cref="IActivatedSkill.OnActivated"/>.
         /// </summary>
         /// <returns>Result of the operation</returns>
-        protected OperationResult ActivateSkill([NotNull] SkillBase skill)
+        protected OperationResult ActivateSkill([NotNull] SkillBase skill, ISkillTarget target)
         {
             if (skill is not IActivatedSkill activatedSkill)
             {
@@ -965,7 +965,7 @@ namespace Systems.SimpleSkills.Components
                 return SkillOperations.SkillAlreadyBeingCast();
 
             activeSkills.Add(skill);
-            activatedSkill.OnActivated();
+            activatedSkill.OnActivated(target);
             return SkillOperations.Permitted();
         }
 
@@ -973,26 +973,26 @@ namespace Systems.SimpleSkills.Components
         ///     Deactivates a skill. Calls <see cref="IActivatedSkill.OnDeactivated"/>.
         /// </summary>
         /// <returns>Result of the operation</returns>
-        protected OperationResult DeactivateSkill<TSkill>()
+        protected OperationResult DeactivateSkill<TSkill>(ISkillTarget target)
             where TSkill : SkillBase, IActivatedSkill, new()
         {
             TSkill skill = SkillsDatabase.GetExact<TSkill>();
             if (ReferenceEquals(skill, null)) return SkillOperations.SkillNotFound();
-            return DeactivateSkill(skill);
+            return DeactivateSkill(skill, target);
         }
 
         /// <summary>
         ///     Deactivates a skill. Calls <see cref="IActivatedSkill.OnDeactivated"/>.
         /// </summary>
         /// <returns>Result of the operation</returns>
-        protected OperationResult DeactivateSkill([NotNull] SkillBase skill)
+        protected OperationResult DeactivateSkill([NotNull] SkillBase skill, ISkillTarget target)
         {
             Debug.Assert(skill is IActivatedSkill, $"Skill {skill.name} does not implement IPassiveSkill");
 
             if (!activeSkills.Remove(skill))
                 return SkillOperations.PassiveNotActive();
 
-            ((IActivatedSkill) skill).OnDeactivated();
+            ((IActivatedSkill) skill).OnDeactivated(this);
             return SkillOperations.Permitted();
         }
 
@@ -1017,7 +1017,7 @@ namespace Systems.SimpleSkills.Components
         {
             for (int i = activeSkills.Count - 1; i >= 0; i--)
             {
-                ((IActivatedSkill) activeSkills[i]).OnTickWhileActive(deltaTime);
+                ((IActivatedSkill) activeSkills[i]).OnTickWhileActive(this, deltaTime);
             }
         }
 
@@ -1230,7 +1230,7 @@ namespace Systems.SimpleSkills.Components
             context.skill.OnCastEnded(context);
             
             if (context.skill is IActivatedSkill passiveSkill)
-                ActivateSkill((SkillBase) passiveSkill); // Guaranteed to be true
+                ActivateSkill((SkillBase) passiveSkill, context.target); // Guaranteed to be true
         }
 
 

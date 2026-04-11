@@ -76,5 +76,15 @@ namespace Systems.SimpleSkills.Examples.Scripts
         {
             TryCastSkill<ExampleFireballSkillLevel1>();
         }
+
+        /// <summary>
+        ///     Toggles the regeneration aura on/off.
+        ///     First call activates it; casting again while active deactivates it.
+        /// </summary>
+        [ContextMenu("Toggle regeneration aura (activated skill)")]
+        public void ToggleRegenerationAura()
+        {
+            TryCastSkill<ExampleRegenerationAuraSkill>();
+        }
     }
 }
