@@ -1,11 +1,26 @@
 ﻿using Systems.SimpleCore.Operations;
 using Systems.SimpleSkills.Components;
+using Systems.SimpleSkills.Data.Abstract;
 using UnityEngine;
 
 namespace Systems.SimpleSkills.Examples.Scripts
 {
     public sealed class ExampleCasterBase : SkillCasterBase
     {
+        [SerializeField] private int fireballLevel = 1;
+
+        /// <summary>
+        ///     Override to drive fireball level from the serialized field.
+        ///     Any other leveled skill falls back to the default (skill's own Level property).
+        /// </summary>
+        protected override int GetSkillLevel(ISkillWithLevels skill)
+        {
+            if (skill is ExampleFireballSkill)
+                return fireballLevel;
+
+            return base.GetSkillLevel(skill);
+        }
+
         [ContextMenu("Cast channeling skill")]
         public void CastChannelingSkill()
         {
@@ -50,6 +65,16 @@ namespace Systems.SimpleSkills.Examples.Scripts
         public void CastMushroom()
         {
             TryCastSkill<ExampleMushroomSkill>();
+        }
+
+        /// <summary>
+        ///     Casts the fireball at the level configured in <see cref="fireballLevel"/>.
+        ///     Any level-1 variant is used as the entry point — the system resolves the correct asset.
+        /// </summary>
+        [ContextMenu("Cast fireball (leveled skill)")]
+        public void CastFireball()
+        {
+            TryCastSkill<ExampleFireballSkillLevel1>();
         }
     }
 }
