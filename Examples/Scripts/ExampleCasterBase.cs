@@ -33,5 +33,23 @@ namespace Systems.SimpleSkills.Examples.Scripts
         {
             TryCastSkill<ExampleOneTimeSkill>();
         }
+
+        [ContextMenu("Cast dash skill (charges)")]
+        public void CastDashSkill()
+        {
+            TryCastSkill<ExampleDashSkill>();
+        }
+
+        [ContextMenu("Cast health potion (skill group)")]
+        public void CastHealthPotion()
+        {
+            TryCastSkill<ExampleHealthPotionSkill>();
+        }
+
+        [ContextMenu("Cast mushroom (skill group)")]
+        public void CastMushroom()
+        {
+            TryCastSkill<ExampleMushroomSkill>();
+        }
     }
 }
