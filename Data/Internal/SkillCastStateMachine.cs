@@ -1,6 +1,4 @@
 using System.Runtime.CompilerServices;
-using Systems.SimpleSkills.Data.Abstract;
-using Systems.SimpleSkills.Data.Enums;
 
 namespace Systems.SimpleSkills.Data.Internal
 {

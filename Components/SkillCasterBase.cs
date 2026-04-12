@@ -631,7 +631,7 @@ namespace Systems.SimpleSkills.Components
             if (!context.skill.HasCooldown) return SkillOperations.Permitted();
 
             // For charge skills, cooldown check is handled separately via charge count
-            if (context.skill is ISkillWithCharges chargeSkill && chargeSkill.MaxCharges > 1)
+            if (context.skill is ISkillWithCharges {MaxCharges: > 1})
                 return SkillOperations.Permitted();
 
             // If skill is not casted, it is not on cooldown

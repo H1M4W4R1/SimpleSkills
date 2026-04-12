@@ -1,5 +1,4 @@
 using Systems.SimpleCore.Operations;
-using Systems.SimpleSkills.Components;
 using Systems.SimpleSkills.Data.Abstract;
 using Systems.SimpleSkills.Data.Context;
 using Systems.SimpleSkills.Operations;

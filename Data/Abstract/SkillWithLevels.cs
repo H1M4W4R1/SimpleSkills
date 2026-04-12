@@ -1,4 +1,3 @@
-using JetBrains.Annotations;
 using Systems.SimpleCore.Storage.Lists;
 using Unity.Mathematics;
 
@@ -35,7 +34,7 @@ namespace Systems.SimpleSkills.Data.Abstract
         ///     The skill asset matching the requested level, or the closest available level
         ///     if the exact level doesn't exist. Returns this skill if no variants are configured.
         /// </returns>
-        [CanBeNull] public virtual SkillBase GetSkillForLevel(int level)
+        public virtual SkillBase GetSkillForLevel(int level)
         {
             // Get skills from database
             ROListAccess<TSelfBaseSkill> sameSkills = SkillsDatabase.GetAll<TSelfBaseSkill>();
